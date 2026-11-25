@@ -11,6 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Poppetje">
   <meta name="format-detection" content="telephone=no">
+  <meta name="poppetje-version" content="v5-search-voice">
   <title>EJZ Poppetje</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
@@ -50,13 +51,21 @@
       </div>
     </main>
 
-    <p class="hint" id="hint">tik · veeg · houd vast · kantel</p>
+    <div class="results" id="results" hidden></div>
 
-    <form class="search" id="search-form" action="https://www.google.com/search" method="get" target="_blank" rel="noopener">
-      <label class="sr-only" for="q">Zoeken op Google</label>
-      <input id="q" name="q" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Wat zoek je?" maxlength="200">
-      <button type="submit" class="go" aria-label="Zoek op Google">Zoek</button>
+    <p class="hint" id="hint">tik · veeg · houd vast · kantel · praat</p>
+
+    <form class="search" id="search-form" action="#" method="get">
+      <label class="sr-only" for="q">Zoeken of een vraag stellen</label>
+      <input id="q" name="q" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Zoek of typ een vraag" maxlength="200">
+      <button type="button" class="mic-btn" id="mic-btn" aria-label="Praten" aria-pressed="false" title="Praat met het poppetje">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/>
+        </svg>
+      </button>
+      <button type="submit" class="go" aria-label="Zoeken">Zoek</button>
     </form>
+    <p class="voice-hint" id="voice-hint" hidden></p>
 
     <button type="button" class="tilt-btn" id="tilt-btn" hidden>Kantelen aanzetten</button>
   </div>

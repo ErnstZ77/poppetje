@@ -17,6 +17,9 @@
   var bubbles = document.getElementById("bubbles");
   var form = document.getElementById("search-form");
   var input = document.getElementById("q");
+  var micBtn = document.getElementById("mic-btn");
+  var resultsEl = document.getElementById("results");
+  var voiceHint = document.getElementById("voice-hint");
   var tiltBtn = document.getElementById("tilt-btn");
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -41,7 +44,9 @@
     moved: false,
     holdTimer: null,
     holdArmed: false,
-    tiltEnabled: false
+    tiltEnabled: false,
+    listening: false,
+    recognition: null
   };
 
   var IDLE_MS = 5000;
@@ -384,27 +389,386 @@
     }
   }
 
-  function openGoogle(q) {
-    var url = "https://www.google.com/search?q=" + encodeURIComponent(q);
-    var a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+
+  var VERSION = "v5-search-voice";
+  var JOKES = [
+    "Waarom hebben wastafels geen geheimen? Omdat ze alles laten weglopen.",
+    "Wat zei de stoel tegen de tafel? Blijf zitten, ik sta er wel.",
+    "Ik ken maar korte moppen. De lange lopen me altijd uit de… mop.",
+    "Waarom nam de loodgieter een liniaal mee? Om de bocht een beetje recht te zetten."
+  ];
+
+  function isStandalone() {
+    return window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  }
+
+  function speechRecCtor() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  }
+
+  function pickNlVoice() {
+    if (!window.speechSynthesis) return null;
+    var voices = speechSynthesis.getVoices() || [];
+    var i;
+    for (i = 0; i < voices.length; i++) {
+      if ((voices[i].lang || "").toLowerCase().indexOf("nl") === 0) return voices[i];
+    }
+    return null;
+  }
+  if (window.speechSynthesis) {
+    speechSynthesis.getVoices();
+    if (typeof speechSynthesis.addEventListener === "function") {
+      speechSynthesis.addEventListener("voiceschanged", function () { pickNlVoice(); });
+    }
+  }
+
+  function speak(text) {
+    if (!text || !window.speechSynthesis) return;
+    var q = new URLSearchParams(location.search);
+    if (q.has("shot") || q.has("closeup") || q.has("icon")) return;
+    try { speechSynthesis.cancel(); } catch (err) {}
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = "nl-NL";
+    u.rate = 1;
+    var voice = pickNlVoice();
+    if (voice) u.voice = voice;
+    speechSynthesis.speak(u);
+    bobMic();
+  }
+
+  function stripHtml(s) {
+    return String(s || "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeText(s) {
+    return String(s || "").toLowerCase().replace(/[?!.,]/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function timeAnswer() {
+    var t = new Date().toLocaleTimeString("nl-NL", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "Europe/Amsterdam"
+    });
+    return "Het is " + t + ".";
+  }
+
+  function dateAnswer() {
+    var d = new Date().toLocaleDateString("nl-NL", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "Europe/Amsterdam"
+    });
+    return "Vandaag is het " + d + ".";
+  }
+
+  function extractSearchQuery(raw) {
+    var q = String(raw || "").trim();
+    q = q.replace(/^(ik ben (er )?op zoek naar|ik zoek naar|ik zoek|zoek eens naar|zoek naar|zoek maar|zoek|search for|search)\s+/i, "");
+    return q.trim() || String(raw || "").trim();
+  }
+
+  function classifyQuery(raw) {
+    var t = normalizeText(raw);
+    if (!t) return { type: "empty" };
+    if (/^(hoi|hallo|hey|hai|hi|goedemorgen|goedemiddag|goedenavond|goeiedag|goedendag)(\s|$)/.test(t)) {
+      return { type: "chat", text: "Hoi! Waar kan ik je mee helpen?" };
+    }
+    if (/\b(hoe laat is het|hoe laat is ie|hoe laat|wat is de tijd|hoe laat is het nu)\b/.test(t) || t === "tijd") {
+      return { type: "chat", text: timeAnswer() };
+    }
+    if (/\b(welke datum is het|welke dag is het|wat is de datum|welke datum|welke dag|wat voor dag)\b/.test(t) || t === "datum") {
+      return { type: "chat", text: dateAnswer() };
+    }
+    if (/\b(vertel (eens )?(een )?mop|een mopje|een grapje|een grap|maak me aan het lachen)\b/.test(t) || t === "mop" || t === "grapje" || t === "grap") {
+      return { type: "chat", text: JOKES[Math.floor(Math.random() * JOKES.length)] };
+    }
+    return { type: "search", query: extractSearchQuery(raw) };
+  }
+
+  function clearResults() {
+    if (!resultsEl) return;
+    resultsEl.innerHTML = "";
+    resultsEl.hidden = true;
+  }
+
+  function renderResults(items) {
+    if (!resultsEl) return;
+    resultsEl.innerHTML = "";
+    if (!items || !items.length) {
+      resultsEl.hidden = true;
+      return;
+    }
+    items.forEach(function (item) {
+      var card = document.createElement("article");
+      card.className = "result-card";
+      var a = document.createElement("a");
+      a.href = item.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      var src = document.createElement("span");
+      src.className = "result-src";
+      src.textContent = item.source;
+      var h = document.createElement("h3");
+      h.textContent = item.title;
+      a.appendChild(src);
+      a.appendChild(h);
+      if (item.snippet) {
+        var p = document.createElement("p");
+        p.textContent = item.snippet;
+        a.appendChild(p);
+      }
+      card.appendChild(a);
+      resultsEl.appendChild(card);
+    });
+    resultsEl.hidden = false;
+  }
+
+  function fetchJson(url, ms) {
+    var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || 7000);
+    return fetch(url, { signal: ctrl ? ctrl.signal : undefined, headers: { Accept: "application/json" } })
+      .then(function (res) {
+        if (!res.ok && res.status !== 202) throw new Error("http " + res.status);
+        return res.json();
+      })
+      .finally(function () { clearTimeout(timer); });
+  }
+
+  function searchWikipedia(query) {
+    var url = "https://nl.wikipedia.org/w/api.php?action=query&list=search&srsearch=" +
+      encodeURIComponent(query) + "&srlimit=4&utf8=1&format=json&origin=*&srprop=snippet";
+    return fetchJson(url).then(function (data) {
+      var hits = (((data || {}).query) || {}).search || [];
+      return hits.map(function (hit) {
+        return {
+          source: "Wikipedia",
+          title: hit.title,
+          snippet: stripHtml(hit.snippet),
+          url: "https://nl.wikipedia.org/wiki/" + encodeURIComponent(hit.title).replace(/%20/g, "_")
+        };
+      });
+    });
+  }
+
+  function searchDuckDuckGo(query) {
+    var url = "https://api.duckduckgo.com/?q=" + encodeURIComponent(query) +
+      "&format=json&no_html=1&skip_disambig=1&t=poppetje";
+    return fetchJson(url).then(function (data) {
+      var items = [];
+      if (data && (data.AbstractText || data.Heading) && data.AbstractURL) {
+        items.push({
+          source: "DuckDuckGo",
+          title: data.Heading || query,
+          snippet: stripHtml(data.AbstractText),
+          url: data.AbstractURL
+        });
+      }
+      var related = (data && data.RelatedTopics) || [];
+      related.forEach(function (topic) {
+        if (items.length >= 3) return;
+        if (topic && topic.Text && topic.FirstURL) {
+          items.push({
+            source: "DuckDuckGo",
+            title: topic.Text.split(" - ")[0],
+            snippet: stripHtml(topic.Text),
+            url: topic.FirstURL
+          });
+        }
+      });
+      return items;
+    });
+  }
+
+  function searchInApp(query) {
+    var q = String(query || "").trim();
+    if (!q) return Promise.resolve([]);
+    startThinking();
+    bubble("Ik zoek het voor je.");
+    return Promise.allSettled([searchWikipedia(q), searchDuckDuckGo(q)])
+      .then(function (parts) {
+        var items = [];
+        var seen = {};
+        parts.forEach(function (part) {
+          if (part.status !== "fulfilled" || !part.value) return;
+          part.value.forEach(function (item) {
+            var key = (item.url || item.title).toLowerCase();
+            if (seen[key]) return;
+            seen[key] = true;
+            items.push(item);
+          });
+        });
+        renderResults(items);
+        if (!items.length) {
+          var miss = "Ik vond niks. Probeer andere woorden.";
+          bubble(miss);
+          speak(miss);
+        } else {
+          var say = "Ik vond " + items.length + (items.length === 1 ? " resultaat" : " resultaten") +
+            " over " + q + ".";
+          bubble(say);
+          speak(say);
+        }
+        return items;
+      })
+      .catch(function () {
+        var miss = "Zoeken lukte even niet. Probeer het zo nog eens.";
+        bubble(miss);
+        speak(miss);
+        return [];
+      })
+      .finally(function () {
+        stopThinking();
+        smileOn(false);
+      });
+  }
+
+  function handleQuery(raw, fromVoice) {
+    var q = String(raw || "").trim();
+    if (!q) return Promise.resolve();
+    activity();
+    input.value = q;
+    smileOn(true);
+    var kind = classifyQuery(q);
+    if (kind.type === "chat") {
+      clearResults();
+      bubble(kind.text);
+      speak(kind.text);
+      setTimeout(function () { smileOn(false); stopThinking(); }, 700);
+      return Promise.resolve(kind);
+    }
+    return searchInApp(kind.query || q).then(function (items) {
+      return { type: "search", query: kind.query || q, items: items };
+    });
+  }
+
+  function showVoiceHint(text) {
+    if (!voiceHint) return;
+    voiceHint.textContent = text;
+    voiceHint.hidden = !text;
+  }
+
+  function setListening(on) {
+    state.listening = !!on;
+    document.body.classList.toggle("listening", !!on);
+    if (micBtn) micBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) {
+      activity();
+      if (!state.phonesOn) setHeadphones(true, false);
+      setLook(0, 0.2, 200);
+    } else {
+      setLook(0, 0, 240);
+    }
+  }
+
+  function stopListening() {
+    if (state.recognition) {
+      try { state.recognition.abort(); } catch (err) {}
+      state.recognition = null;
+    }
+    setListening(false);
+  }
+
+  function dictationFallback(reason) {
+    stopListening();
+    var msg = isStandalone()
+      ? "In de app op je beginscherm werkt de microfoonknop vaak niet. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord."
+      : "Spraakherkenning is hier niet beschikbaar. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord.";
+    showVoiceHint(msg);
+    bubble("Zeg het maar via het toetsenbord.");
+    try { input.focus(); } catch (err) {}
+  }
+
+  function startListening() {
+    var Ctor = speechRecCtor();
+    if (!Ctor) {
+      dictationFallback("unsupported");
+      return;
+    }
+    if (state.listening) {
+      stopListening();
+      return;
+    }
+    showVoiceHint("");
+    var rec;
+    try {
+      rec = new Ctor();
+    } catch (err) {
+      dictationFallback("construct");
+      return;
+    }
+    rec.lang = "nl-NL";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    rec.onstart = function () {
+      setListening(true);
+      bubble("Ik luister…");
+    };
+    rec.onresult = function (event) {
+      var text = "";
+      var finalText = "";
+      var i;
+      for (i = event.resultIndex; i < event.results.length; i++) {
+        var piece = event.results[i][0].transcript;
+        text += piece;
+        if (event.results[i].isFinal) finalText += piece;
+      }
+      if (text) input.value = text.trim();
+      if (finalText.trim()) {
+        stopListening();
+        handleQuery(finalText.trim(), true);
+      }
+    };
+    rec.onerror = function (event) {
+      var err = (event && event.error) || "error";
+      if (err === "aborted" || err === "no-speech") {
+        stopListening();
+        return;
+      }
+      dictationFallback(err);
+    };
+    rec.onend = function () {
+      if (state.recognition === rec) setListening(false);
+      state.recognition = null;
+    };
+    state.recognition = rec;
+    try {
+      rec.start();
+    } catch (err) {
+      dictationFallback("start");
+    }
   }
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
+    e.stopPropagation();
     var q = input.value.trim();
     if (!q) return;
-    activity();
-    bubble("Ik zoek het voor je.");
-    smileOn(true);
-    openGoogle(q);
-    setTimeout(function () { smileOn(false); stopThinking(); }, 800);
+    handleQuery(q, false);
   });
+
+  if (micBtn) {
+    micBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      activity();
+      startListening();
+    });
+  }
+
 
   input.addEventListener("input", onType);
   input.addEventListener("focus", function () {
@@ -567,7 +931,7 @@
 
   var idleRunning = false;
   setInterval(function () {
-    if (reduced || idleRunning || state.thinking || state.pointerId !== null) return;
+    if (reduced || idleRunning || state.thinking || state.listening || state.pointerId !== null) return;
     if (now() - state.lastActivity < IDLE_MS) return;
     idleRunning = true;
     var fn = idleAnims[Math.floor(Math.random() * idleAnims.length)];
@@ -598,6 +962,7 @@
 
   /* Public hooks for screenshots / checks. */
   window.__poppetje = {
+    version: VERSION,
     setHeadphones: setHeadphones,
     bounce: bounce,
     blink: blink,
@@ -609,7 +974,13 @@
     stopThinking: stopThinking,
     activity: activity,
     wait: wait,
-    state: state
+    state: state,
+    handleQuery: handleQuery,
+    searchInApp: searchInApp,
+    startListening: startListening,
+    stopListening: stopListening,
+    speak: speak,
+    classifyQuery: classifyQuery
   };
 
   function greet() {

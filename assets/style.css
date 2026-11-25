@@ -47,12 +47,14 @@ body {
 .app {
   height: 100dvh;
   height: 100svh;
+  width: 100%;
   padding: calc(18px + var(--safe-top)) 22px calc(18px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   align-items: center;
   max-width: 430px;
   margin: 0 auto;
+  overflow-x: hidden;
 }
 
 .top {
@@ -207,6 +209,7 @@ body {
 .search {
   flex: 0 0 auto;
   width: 100%;
+  min-width: 0;
   display: flex;
   gap: 8px;
   align-items: stretch;
@@ -214,6 +217,7 @@ body {
 
 .search input {
   flex: 1 1 auto;
+  min-width: 0;
   height: 48px;
   border: 1.5px solid var(--line);
   border-radius: 16px;
@@ -255,6 +259,116 @@ body {
 
 .go:active { background: var(--olive-dk); }
 
+.mic-btn {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+}
+.mic-btn:active { background: var(--soft); }
+.mic-btn[aria-pressed="true"],
+body.listening .mic-btn {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+  animation: mic-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  50% { box-shadow: 0 0 0 6px rgba(63, 140, 102, 0.22); }
+}
+
+.voice-hint {
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--muted);
+  text-align: center;
+}
+
+.results {
+  flex: 0 1 auto;
+  width: 100%;
+  max-height: 34vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding-bottom: 2px;
+}
+.results[hidden] { display: none !important; }
+.result-card {
+  background: #fff;
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.result-card a {
+  display: block;
+  padding: 10px 14px 12px;
+  color: inherit;
+  text-decoration: none;
+}
+.result-card a:active { background: var(--soft); }
+.result-src {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 4px;
+}
+.result-card h3 {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0 0 4px;
+}
+.result-card p {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.results-empty {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px;
+}
+
+body.listening .mascot {
+  filter: saturate(1.05);
+}
+body.listening #mic-arm {
+  animation: listen-bob 0.7s ease-in-out infinite;
+}
+@keyframes listen-bob {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(10deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mic-btn[aria-pressed="true"],
+  body.listening .mic-btn,
+  body.listening #mic-arm { animation: none; }
+}
+
 .tilt-btn {
   flex: 0 0 auto;
   margin-top: 10px;
@@ -292,7 +406,9 @@ body.icon-mode .top,
 body.icon-mode .hint,
 body.icon-mode .search,
 body.icon-mode .tilt-btn,
-body.icon-mode .bubbles { display: none !important; }
+body.icon-mode .bubbles,
+body.icon-mode .results,
+body.icon-mode .voice-hint { display: none !important; }
 body.icon-mode .stage {
   flex: none;
   width: 100%;
@@ -321,7 +437,9 @@ body.closeup-mode .top,
 body.closeup-mode .hint,
 body.closeup-mode .search,
 body.closeup-mode .tilt-btn,
-body.closeup-mode .bubbles { display: none !important; }
+body.closeup-mode .bubbles,
+body.closeup-mode .results,
+body.closeup-mode .voice-hint { display: none !important; }
 body.closeup-mode .stage {
   flex: none;
   width: 100%;
@@ -331,7 +449,7 @@ body.closeup-mode .stage {
 body.closeup-mode .shadow { opacity: 0.28; }
 
 @media (prefers-reduced-motion: reduce) {
-  .bubble, .mascot, #head, #eye-l, #eye-r, #phones, .shadow, #cup-l, #cup-r, #mic-arm {
+  .bubble, .mascot, #head, #eye-l, #eye-r, #phones, .shadow, #cup-l, #cup-r, #mic-arm, .mic-btn {
     will-change: auto;
   }
 }
