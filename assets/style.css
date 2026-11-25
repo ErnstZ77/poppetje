@@ -95,6 +95,30 @@ body {
   cursor: pointer;
 }
 
+.tap-continue {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  border: none;
+  background: rgba(248, 249, 253, 0.78);
+  color: var(--green);
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  padding: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.tap-continue[hidden] { display: none !important; }
+.tap-continue:active { background: rgba(248, 249, 253, 0.9); }
+
 .bubbles {
   position: absolute;
   left: 50%;
@@ -543,7 +567,8 @@ body.icon-mode .results,
 body.icon-mode .voice-hint,
 body.icon-mode .listen-status,
 body.icon-mode .settings,
-body.icon-mode .voice-debug { display: none !important; }
+body.icon-mode .voice-debug,
+body.icon-mode .tap-continue { display: none !important; }
 body.icon-mode .stage {
   flex: none;
   width: 100%;
@@ -577,7 +602,8 @@ body.closeup-mode .results,
 body.closeup-mode .voice-hint,
 body.closeup-mode .listen-status,
 body.closeup-mode .settings,
-body.closeup-mode .voice-debug { display: none !important; }
+body.closeup-mode .voice-debug,
+body.closeup-mode .tap-continue { display: none !important; }
 body.closeup-mode .stage {
   flex: none;
   width: 100%;

@@ -25,11 +25,13 @@
   var voiceDebugToggle = document.getElementById("voice-debug");
   var voiceDebugLogEl = document.getElementById("voice-debug-log");
   var tiltBtn = document.getElementById("tilt-btn");
+  var tapContinue = document.getElementById("tap-continue");
   var SHORTCUT_KEY = "poppetje-shortcut-name";
   var DEBUG_KEY = "poppetje-voice-debug";
   var SILENCE_MS = 1000;
   var NO_RESULT_MS = 8000;
-  var START_WATCH_MS = 1500;
+  var RESUME_AFTER_TTS_MS = 400;
+  var STOP_WAIT_MS = 300;
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", function (e) {
@@ -67,8 +69,11 @@
     noResultTimer: null,
     startWatchTimer: null,
     gotResult: false,
+    gotAudio: false,
     speechUnlocked: false,
-    lastTranscriptAt: 0
+    lastTranscriptAt: 0,
+    needsTap: false,
+    starting: false
   };
   var voiceDebugLines = [];
 
@@ -432,7 +437,7 @@
   }
 
 
-  var VERSION = "v7-listen";
+  var VERSION = "v8-restart";
   var JOKES = [
     "Waarom hebben wastafels geen geheimen? Omdat ze alles laten weglopen.",
     "Wat zei de stoel tegen de tafel? Blijf zitten, ik sta er wel.",
@@ -489,8 +494,8 @@
   }
 
   function speak(text) {
+    return stopRecognitionFully().then(function () {
     return new Promise(function (resolve) {
-      stopRecognitionOnly();
       if (!text || !window.speechSynthesis || isShotMode()) {
         resolve();
         return;
@@ -514,6 +519,7 @@
       try { speechSynthesis.speak(u); } catch (err) { finish(); return; }
       bobMic();
       setTimeout(finish, Math.min(12000, 1200 + String(text).length * 80));
+    });
     });
   }
 
@@ -1043,16 +1049,6 @@
     try { input.focus(); } catch (err) {}
   }
 
-  function askTapAgain(reason) {
-    clearStartWatch();
-    clearNoResultTimer();
-    stopRecognitionOnly();
-    setListening(false);
-    setListenStatus("");
-    showVoiceHint("Tik nog eens op de microfoon om verder te praten.");
-    voiceLog("need-tap", reason || "");
-  }
-
   function errorMessage(code) {
     if (code === "not-allowed" || code === "service-not-allowed" || code === "audio-capture") {
       return "Geen toegang tot de microfoon. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord.";
@@ -1092,19 +1088,97 @@
     }
   }
 
-  function stopRecognitionOnly() {
-    if (state.recognition) {
+  function detachRecognition(rec) {
+    if (!rec) return;
+    rec.onstart = null;
+    rec.onresult = null;
+    rec.onerror = null;
+    rec.onend = null;
+    rec.onspeechend = null;
+    rec.onaudioend = null;
+    rec.onaudiostart = null;
+    rec.onsoundstart = null;
+    rec.onspeechstart = null;
+  }
+
+  function stopRecognitionFully() {
+    return new Promise(function (resolve) {
       var rec = state.recognition;
       state.recognition = null;
-      try { rec.abort(); } catch (err) {}
-    }
+      clearStartWatch();
+      if (!rec) {
+        voiceLog("stopRecognition", "already-idle");
+        resolve();
+        return;
+      }
+      var done = false;
+      var finish = function (why) {
+        if (done) return;
+        done = true;
+        detachRecognition(rec);
+        voiceLog("stopRecognition", why);
+        resolve();
+      };
+      rec.onstart = null;
+      rec.onresult = null;
+      rec.onspeechend = null;
+      rec.onaudioend = null;
+      rec.onaudiostart = null;
+      rec.onsoundstart = null;
+      rec.onspeechstart = null;
+      rec.onerror = function (ev) {
+        var err = ev && ev.error;
+        voiceLog("stopRecognition-error", err || "");
+      };
+      rec.onend = function () { finish("onend"); };
+      try {
+        rec.abort();
+        voiceLog("abort()");
+      } catch (err) {
+        voiceLog("abort-throw", err && err.message);
+        finish("abort-throw");
+        return;
+      }
+      setTimeout(function () { finish("timeout-300"); }, STOP_WAIT_MS);
+    });
+  }
+
+  function stopRecognitionOnly() {
+    stopRecognitionFully();
+  }
+
+  function hideTapToContinue() {
+    state.needsTap = false;
+    if (tapContinue) tapContinue.hidden = true;
+    document.body.classList.remove("needs-tap");
+  }
+
+  function showTapToContinue(reason) {
+    state.needsTap = true;
+    state.starting = false;
+    clearStartWatch();
+    setListening(false);
+    setListenStatus("");
+    showVoiceHint("");
+    if (tapContinue) tapContinue.hidden = false;
+    document.body.classList.add("needs-tap");
+    voiceLog("tap-to-continue", reason || "");
+  }
+
+  function continueFromTap(source) {
+    if (!state.conversation && !state.needsTap) return;
+    voiceLog("tap-continue", source || "tap");
+    hideTapToContinue();
+    unlockSpeech();
+    activity();
+    startRecognition(false);
   }
 
   function stopListening() {
     clearSilenceTimer();
     clearNoResultTimer();
     clearStartWatch();
-    stopRecognitionOnly();
+    stopRecognitionFully();
     setListening(false);
   }
 
@@ -1112,11 +1186,13 @@
     state.conversation = false;
     state.dictationMode = false;
     state.pendingTranscript = "";
+    state.starting = false;
+    hideTapToContinue();
     clearSilenceTimer();
     clearDictateTimer();
     clearNoResultTimer();
     clearStartWatch();
-    stopRecognitionOnly();
+    stopRecognitionFully();
     setListening(false);
     setListenStatus("");
     showVoiceHint("");
@@ -1131,7 +1207,7 @@
   function dictationFallback(reason) {
     clearStartWatch();
     clearNoResultTimer();
-    stopRecognitionOnly();
+    stopRecognitionFully();
     setListening(false);
     state.dictationMode = true;
     var msg = errorMessage(reason || "unsupported");
@@ -1150,13 +1226,14 @@
     clearNoResultTimer();
     clearStartWatch();
     state.pendingTranscript = "";
-    stopRecognitionOnly();
-    setListening(false);
     thinkLinesShown = false;
     bubble(q, "user", { sticky: true });
     input.value = "";
     voiceLog("submit", q);
-    return handleQuery(q, true).then(function (res) {
+    setListening(false);
+    return stopRecognitionFully().then(function () {
+      return handleQuery(q, true);
+    }).then(function (res) {
       input.value = "";
       return res;
     }).catch(function (err) {
@@ -1166,7 +1243,8 @@
       state.submitLock = false;
       input.value = "";
       if (state.conversation && speechRecCtor()) {
-        setTimeout(function () { resumeListening(); }, 280);
+        voiceLog("resume-scheduled", "after-tts+" + RESUME_AFTER_TTS_MS);
+        setTimeout(function () { resumeListening(); }, RESUME_AFTER_TTS_MS);
       } else if (state.conversation || state.dictationMode) {
         state.dictationMode = true;
         setListenStatus("zeg het maar…");
@@ -1228,46 +1306,38 @@
     }, 1200);
   }
 
+  function markLive(source) {
+    voiceLog(source);
+    state.gotAudio = true;
+    clearStartWatch();
+    if (!state.listening) setListening(true);
+    if (!state.noResultTimer && !state.gotResult) armNoResultTimer();
+  }
+
   function resumeListening() {
-    if (!state.conversation || state.submitLock || state.speaking) return;
+    if (!state.conversation || state.submitLock || state.speaking || state.needsTap) return;
     if (!speechRecCtor()) {
       dictationFallback("unsupported");
       return;
     }
-    startRecognition(true);
+    voiceLog("resumeListening");
+    startRecognition(true, 1);
   }
 
-  function startRecognition(isResume) {
-    var Ctor = speechRecCtor();
-    if (!Ctor) {
-      dictationFallback("unsupported");
-      return;
-    }
-    if (state.recognition) return;
-    showVoiceHint("");
-    state.pendingTranscript = "";
-    var rec;
-    try {
-      rec = new Ctor();
-    } catch (err) {
-      dictationFallback("construct");
-      return;
-    }
+  function bindRecognition(rec) {
     rec.lang = "nl-NL";
     rec.interimResults = true;
     rec.continuous = false;
     rec.maxAlternatives = 1;
-    rec.onstart = function () {
-      clearStartWatch();
-      voiceLog("onstart");
-      setListening(true);
-      armNoResultTimer();
-    };
+    rec.onstart = function () { markLive("onstart"); };
+    rec.onaudiostart = function () { markLive("onaudiostart"); };
+    rec.onsoundstart = function () { markLive("onsoundstart"); };
+    rec.onspeechstart = function () { markLive("onspeechstart"); };
     rec.onresult = function (event) {
       var got = readTranscript(event);
       state.gotResult = true;
       clearNoResultTimer();
-      voiceLog("onresult", (got.hasFinal ? "final " : "interim ") + (got.text || "(leeg)"));
+      markLive("onresult " + (got.hasFinal ? "final " : "interim ") + (got.text || "(leeg)"));
       noteTranscript(got.text || got.finalText, got.hasFinal);
     };
     rec.onspeechend = function () {
@@ -1291,66 +1361,129 @@
         heardNothing();
         return;
       }
+      if (err === "not-allowed" || err === "service-not-allowed") {
+        if (state.conversation) {
+          showTapToContinue(err);
+          return;
+        }
+      }
       dictationFallback(err);
     };
     rec.onend = function () {
       voiceLog("onend");
       if (state.recognition === rec) state.recognition = null;
       clearStartWatch();
-      if (state.submitLock) return;
+      if (state.submitLock || state.starting) return;
       if (state.pendingTranscript) {
         submitIfPending("onend-submit");
         return;
       }
-      if (state.conversation && !state.silenceTimer && !state.speaking && !state.dictationMode) {
+      if (state.conversation && !state.silenceTimer && !state.speaking && !state.dictationMode && !state.needsTap) {
+        voiceLog("onend-restart");
         setTimeout(function () {
-          if (state.conversation && !state.recognition && !state.submitLock && !state.speaking) {
+          if (state.conversation && !state.recognition && !state.submitLock && !state.speaking && !state.needsTap) {
             resumeListening();
           }
-        }, 240);
+        }, RESUME_AFTER_TTS_MS);
       }
     };
-    state.recognition = rec;
-    clearStartWatch();
-    state.startWatchTimer = setTimeout(function () {
-      state.startWatchTimer = null;
-      if (state.listening || state.submitLock) return;
-      voiceLog("start-timeout");
-      if (isResume && state.conversation) {
-        askTapAgain("no-onstart");
-        return;
-      }
-      dictationFallback("start");
-    }, START_WATCH_MS);
-    try {
-      rec.start();
-      voiceLog("start()");
-    } catch (err) {
-      clearStartWatch();
-      state.recognition = null;
-      voiceLog("start-throw", err && err.message);
-      if (isResume && state.conversation) {
-        askTapAgain("start-throw");
-        return;
-      }
-      dictationFallback("start");
+  }
+
+  function startRecognition(isResume, attempt) {
+    attempt = attempt || 1;
+    var Ctor = speechRecCtor();
+    if (!Ctor) {
+      dictationFallback("unsupported");
+      return;
     }
+    if (state.submitLock || state.speaking) {
+      voiceLog("startRecognition", "deferred");
+      return;
+    }
+    if (state.starting) {
+      voiceLog("startRecognition", "already-starting");
+      return;
+    }
+    state.starting = true;
+    hideTapToContinue();
+    showVoiceHint("");
+    state.pendingTranscript = "";
+    state.gotResult = false;
+    state.gotAudio = false;
+
+    var begin = function () {
+      if (state.submitLock || state.speaking || !state.conversation && isResume) {
+        state.starting = false;
+        return;
+      }
+      var rec;
+      try {
+        rec = new Ctor();
+      } catch (err) {
+        state.starting = false;
+        voiceLog("construct-throw", err && err.message);
+        dictationFallback("construct");
+        return;
+      }
+      bindRecognition(rec);
+      state.recognition = rec;
+      voiceLog("new-instance", "attempt=" + attempt);
+      try {
+        rec.start();
+        state.starting = false;
+        voiceLog("start()", "attempt=" + attempt);
+      } catch (err) {
+        var msg = ((err && (err.name || "")) + " " + (err && err.message || "")).trim();
+        voiceLog("start-throw", msg || "start");
+        state.recognition = null;
+        detachRecognition(rec);
+        if (/InvalidState/i.test(msg) && attempt < 2) {
+          voiceLog("retry-after-busy");
+          setTimeout(function () {
+            state.starting = false;
+            if (!state.conversation || state.submitLock || state.speaking) return;
+            startRecognition(isResume, attempt + 1);
+          }, STOP_WAIT_MS);
+          return;
+        }
+        state.starting = false;
+        if (isResume && state.conversation) {
+          showTapToContinue(msg || "start-throw");
+          return;
+        }
+        dictationFallback("start");
+      }
+    };
+
+    if (state.recognition) {
+      voiceLog("startRecognition", "wait-for-old");
+      stopRecognitionFully().then(function () {
+        begin();
+      });
+      return;
+    }
+    begin();
   }
 
   function startConversation() {
     state.conversation = true;
     state.dictationMode = false;
     state.pendingTranscript = "";
+    hideTapToContinue();
     showVoiceHint("");
     if (micBtn) {
       micBtn.setAttribute("aria-pressed", "true");
       micBtn.setAttribute("aria-label", "Stoppen");
     }
     voiceLog("startConversation");
-    startRecognition(false);
+    startRecognition(false, 1);
   }
 
   function startListening() {
+    if (state.needsTap) {
+      continueFromTap("mic");
+      return;
+    }
     if (state.conversation || state.listening) {
       endConversation();
       return;
@@ -1373,6 +1506,14 @@
       activity();
       unlockSpeech();
       startListening();
+    });
+  }
+
+  if (tapContinue) {
+    tapContinue.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      continueFromTap("button");
     });
   }
 
@@ -1421,6 +1562,12 @@
   }
 
   stage.addEventListener("pointerdown", function (e) {
+    if (state.needsTap) {
+      e.preventDefault();
+      e.stopPropagation();
+      continueFromTap("stage");
+      return;
+    }
     if (e.target.closest && e.target.closest("input, button, a, form")) return;
     if (state.pointerId !== null) return;
     state.pointerId = e.pointerId;
@@ -1618,7 +1765,10 @@
     getShortcutName: getShortcutName,
     tryOpenUrl: tryOpenUrl,
     voiceLog: voiceLog,
-    readTranscript: readTranscript
+    readTranscript: readTranscript,
+    stopRecognitionFully: stopRecognitionFully,
+    showTapToContinue: showTapToContinue,
+    continueFromTap: continueFromTap
   };
 
   function greet() {
