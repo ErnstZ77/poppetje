@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Poppetje">
   <meta name="format-detection" content="telephone=no">
-  <meta name="poppetje-version" content="v5-search-voice">
+  <meta name="poppetje-version" content="v6-chat">
   <title>EJZ Poppetje</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
@@ -65,7 +65,15 @@
       </button>
       <button type="submit" class="go" aria-label="Zoeken">Zoek</button>
     </form>
+    <p class="listen-status" id="listen-status" hidden>luistert…</p>
     <p class="voice-hint" id="voice-hint" hidden></p>
+
+    <details class="settings" id="settings">
+      <summary>Instellingen</summary>
+      <label class="settings-label" for="shortcut-name">Opdracht-naam</label>
+      <input id="shortcut-name" type="text" maxlength="80" placeholder="Speel Spotify" autocomplete="off" spellcheck="false" enterkeyhint="done">
+      <p class="settings-help">Vul hier de exacte naam van je opdracht in Opdrachten in als je wilt dat Spotify muziek start. De stappen staan in de README.</p>
+    </details>
 
     <button type="button" class="tilt-btn" id="tilt-btn" hidden>Kantelen aanzetten</button>
   </div>

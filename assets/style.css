@@ -98,15 +98,18 @@ body {
 .bubbles {
   position: absolute;
   left: 50%;
-  top: 8%;
-  width: min(280px, 86%);
+  top: 6%;
+  width: min(300px, 90%);
+  max-height: 42%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   transform: translateX(-50%);
   z-index: 5;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .bubble-row {
@@ -114,6 +117,13 @@ body {
   align-items: flex-end;
   gap: 8px;
   max-width: 100%;
+  pointer-events: none;
+}
+.bubble-row.has-action { pointer-events: auto; }
+.bubble-row.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+  margin-left: auto;
 }
 
 .bubble-avatar {
@@ -137,6 +147,36 @@ body {
   box-shadow: none;
   transform-origin: 20% 100%;
   will-change: transform, opacity;
+}
+.bubble.user {
+  background: #fff;
+  color: var(--ink);
+  border: 1.5px solid var(--line);
+  transform-origin: 80% 100%;
+}
+.bubble-actions {
+  margin-top: 8px;
+}
+.open-spotify {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--green);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding: 11px 14px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.open-spotify:active { background: var(--soft); }
+.bubble.user .open-spotify {
+  background: var(--green);
+  color: #fff;
 }
 
 .mascot {
@@ -297,6 +337,69 @@ body.listening .mic-btn {
   color: var(--muted);
   text-align: center;
 }
+.listen-status {
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--green);
+  text-align: center;
+}
+.listen-status[hidden] { display: none !important; }
+
+.settings {
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: 8px;
+  color: var(--muted);
+}
+.settings summary {
+  cursor: pointer;
+  list-style: none;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2px 0;
+}
+.settings summary::-webkit-details-marker { display: none; }
+.settings-label {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.settings #shortcut-name {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  height: 40px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 0 12px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.settings #shortcut-name:focus {
+  box-shadow: 0 0 0 3px rgba(63, 140, 102, 0.28);
+  border-color: var(--green);
+}
+.settings-help {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
 
 .results {
   flex: 0 1 auto;
@@ -408,7 +511,9 @@ body.icon-mode .search,
 body.icon-mode .tilt-btn,
 body.icon-mode .bubbles,
 body.icon-mode .results,
-body.icon-mode .voice-hint { display: none !important; }
+body.icon-mode .voice-hint,
+body.icon-mode .listen-status,
+body.icon-mode .settings { display: none !important; }
 body.icon-mode .stage {
   flex: none;
   width: 100%;
@@ -439,7 +544,9 @@ body.closeup-mode .search,
 body.closeup-mode .tilt-btn,
 body.closeup-mode .bubbles,
 body.closeup-mode .results,
-body.closeup-mode .voice-hint { display: none !important; }
+body.closeup-mode .voice-hint,
+body.closeup-mode .listen-status,
+body.closeup-mode .settings { display: none !important; }
 body.closeup-mode .stage {
   flex: none;
   width: 100%;

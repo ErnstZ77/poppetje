@@ -20,7 +20,10 @@
   var micBtn = document.getElementById("mic-btn");
   var resultsEl = document.getElementById("results");
   var voiceHint = document.getElementById("voice-hint");
+  var listenStatus = document.getElementById("listen-status");
+  var shortcutInput = document.getElementById("shortcut-name");
   var tiltBtn = document.getElementById("tilt-btn");
+  var SHORTCUT_KEY = "poppetje-shortcut-name";
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", function (e) {
@@ -46,7 +49,15 @@
     holdArmed: false,
     tiltEnabled: false,
     listening: false,
-    recognition: null
+    recognition: null,
+    conversation: false,
+    dictationMode: false,
+    pendingTranscript: "",
+    silenceTimer: null,
+    dictateTimer: null,
+    speaking: false,
+    submitLock: false,
+    lastOpenUrl: ""
   };
 
   var IDLE_MS = 5000;
@@ -205,16 +216,26 @@
 
   var AVATAR = '<svg class="bubble-avatar" viewBox="8 12 184 184" aria-hidden="true"><g transform="rotate(-8 100 108)"><circle cx="100" cy="108" r="62" fill="#000"/><path d="M 30.46 82.69 A 74 74 0 0 1 169.54 82.69" fill="none" stroke="#3F8C66" stroke-width="14" stroke-linecap="round"/><rect x="16" y="86" width="28" height="52" rx="14" fill="#3F8C66"/><rect x="156" y="86" width="28" height="52" rx="14" fill="#3F8C66"/><path d="M 36 128 Q 44 144 63 143" fill="none" stroke="#3F8C66" stroke-width="6" stroke-linecap="round"/><rect x="52" y="136" width="22" height="14" rx="7" fill="#3F8C66"/><g transform="rotate(8 103.5 105)"><rect x="96" y="90" width="15" height="30" rx="7.5" fill="#fff"/></g><g transform="rotate(8 131.5 105)"><rect x="124" y="90" width="15" height="30" rx="7.5" fill="#fff"/></g></g></svg>';
 
-  function bubble(text) {
-    if (!text) return;
+  function bubble(text, who, opts) {
+    if (!text) return null;
+    who = who || "bot";
+    opts = opts || {};
     var row = document.createElement("div");
-    row.className = "bubble-row";
-    row.innerHTML = AVATAR;
+    row.className = "bubble-row " + (who === "user" ? "user" : "bot");
+    if (opts.action) row.classList.add("has-action");
+    if (who !== "user") row.innerHTML = AVATAR;
     var el = document.createElement("div");
-    el.className = "bubble";
+    el.className = "bubble" + (who === "user" ? " user" : "");
     el.textContent = text;
+    if (opts.action) {
+      var actions = document.createElement("div");
+      actions.className = "bubble-actions";
+      actions.appendChild(opts.action);
+      el.appendChild(actions);
+    }
     row.appendChild(el);
     bubbles.appendChild(row);
+    try { bubbles.scrollTop = bubbles.scrollHeight; } catch (err) {}
     if (typeof anime !== "undefined" && !reduced) {
       anime.remove(el);
       anime({
@@ -225,23 +246,31 @@
         duration: 520,
         easing: "easeOutElastic(1, 0.7)"
       });
-      setTimeout(function () {
-        if (!el.parentNode) return;
-        anime({
-          targets: el,
-          opacity: 0,
-          translateY: -10,
-          duration: 280,
-          easing: "easeInQuad",
-          complete: function () { row.remove(); }
-        });
-      }, 2200);
     } else {
       el.style.opacity = "1";
-      setTimeout(function () { row.remove(); }, reduced ? 1800 : 2400);
     }
-    while (bubbles.children.length > 2) bubbles.removeChild(bubbles.firstChild);
+    var sticky = opts.sticky !== false && (who === "user" || state.conversation || state.dictationMode || opts.action);
+    if (!sticky) {
+      var life = reduced ? 1800 : 2400;
+      if (typeof anime !== "undefined" && !reduced) {
+        setTimeout(function () {
+          if (!el.parentNode) return;
+          anime({
+            targets: el,
+            opacity: 0,
+            translateY: -10,
+            duration: 280,
+            easing: "easeInQuad",
+            complete: function () { if (row.parentNode) row.remove(); }
+          });
+        }, life);
+      } else {
+        setTimeout(function () { if (row.parentNode) row.remove(); }, life);
+      }
+    }
+    while (bubbles.children.length > 6) bubbles.removeChild(bubbles.firstChild);
     bobMic();
+    return row;
   }
 
   function setMicRotate(angle, instant, delay) {
@@ -379,7 +408,7 @@
     if (input.value.trim()) {
       if (!state.thinking) startThinking();
       else setLook(0.15, 0.95, 200);
-      if (!thinkLinesShown) {
+      if (!thinkLinesShown && !state.conversation && !state.dictationMode && !state.listening) {
         bubble(THINK_LINES[Math.floor(Math.random() * THINK_LINES.length)]);
         thinkLinesShown = true;
       }
@@ -387,20 +416,29 @@
       thinkLinesShown = false;
       if (state.thinking) stopThinking();
     }
+    scheduleDictationSubmit();
   }
 
 
-  var VERSION = "v5-search-voice";
+  var VERSION = "v6-chat";
   var JOKES = [
     "Waarom hebben wastafels geen geheimen? Omdat ze alles laten weglopen.",
     "Wat zei de stoel tegen de tafel? Blijf zitten, ik sta er wel.",
     "Ik ken maar korte moppen. De lange lopen me altijd uit de… mop.",
     "Waarom nam de loodgieter een liniaal mee? Om de bocht een beetje recht te zetten."
   ];
+  var UNITS = { nul: 0, zero: 0, een: 1, twee: 2, drie: 3, vier: 4, vijf: 5, zes: 6, zeven: 7, acht: 8, negen: 9 };
+  var TEENS = { tien: 10, elf: 11, twaalf: 12, dertien: 13, veertien: 14, vijftien: 15, zestien: 16, zeventien: 17, achttien: 18, negentien: 19 };
+  var TENS = { twintig: 20, dertig: 30, veertig: 40, vijftig: 50, zestig: 60, zeventig: 70, tachtig: 80, negentig: 90 };
 
   function isStandalone() {
     return window.navigator.standalone === true ||
       (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  }
+
+  function isShotMode() {
+    var q = new URLSearchParams(location.search);
+    return q.has("shot") || q.has("closeup") || q.has("icon");
   }
 
   function speechRecCtor() {
@@ -424,17 +462,31 @@
   }
 
   function speak(text) {
-    if (!text || !window.speechSynthesis) return;
-    var q = new URLSearchParams(location.search);
-    if (q.has("shot") || q.has("closeup") || q.has("icon")) return;
-    try { speechSynthesis.cancel(); } catch (err) {}
-    var u = new SpeechSynthesisUtterance(text);
-    u.lang = "nl-NL";
-    u.rate = 1;
-    var voice = pickNlVoice();
-    if (voice) u.voice = voice;
-    speechSynthesis.speak(u);
-    bobMic();
+    return new Promise(function (resolve) {
+      if (!text || !window.speechSynthesis || isShotMode()) {
+        resolve();
+        return;
+      }
+      try { speechSynthesis.cancel(); } catch (err) {}
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = "nl-NL";
+      u.rate = 1;
+      var voice = pickNlVoice();
+      if (voice) u.voice = voice;
+      var done = false;
+      var finish = function () {
+        if (done) return;
+        done = true;
+        state.speaking = false;
+        resolve();
+      };
+      u.onend = finish;
+      u.onerror = finish;
+      state.speaking = true;
+      try { speechSynthesis.speak(u); } catch (err) { finish(); return; }
+      bobMic();
+      setTimeout(finish, Math.min(12000, 1200 + String(text).length * 80));
+    });
   }
 
   function stripHtml(s) {
@@ -454,13 +506,17 @@
     return String(s || "").toLowerCase().replace(/[?!.,]/g, " ").replace(/\s+/g, " ").trim();
   }
 
+  function normalizeWord(w) {
+    return String(w || "").toLowerCase().replace(/ë/g, "e").replace(/é/g, "e").replace(/ï/g, "i");
+  }
+
   function timeAnswer() {
-    var t = new Date().toLocaleTimeString("nl-NL", {
+    var tm = new Date().toLocaleTimeString("nl-NL", {
       hour: "numeric",
       minute: "2-digit",
       timeZone: "Europe/Amsterdam"
     });
-    return "Het is " + t + ".";
+    return "Het is " + tm + ".";
   }
 
   function dateAnswer() {
@@ -474,10 +530,190 @@
     return "Vandaag is het " + d + ".";
   }
 
+  function parseDutchNumberToken(token) {
+    token = normalizeWord(token).replace(/,/g, ".");
+    if (!token) return null;
+    if (/^\d+(\.\d+)?$/.test(token)) {
+      var n = parseFloat(token);
+      return isFinite(n) ? n : null;
+    }
+    if (UNITS[token] != null) return UNITS[token];
+    if (TEENS[token] != null) return TEENS[token];
+    if (TENS[token] != null) return TENS[token];
+    if (token === "honderd") return 100;
+    if (token === "duizend") return 1000;
+    var m = token.match(/^(.*)duizend(.*)$/);
+    if (m) {
+      var left = m[1] ? parseDutchNumberToken(m[1]) : 1;
+      var right = m[2] ? parseDutchNumberToken(m[2]) : 0;
+      if (left == null || right == null) return null;
+      return left * 1000 + right;
+    }
+    m = token.match(/^(.*)honderd(.*)$/);
+    if (m) {
+      left = m[1] ? parseDutchNumberToken(m[1]) : 1;
+      right = m[2] ? parseDutchNumberToken(m[2]) : 0;
+      if (left == null || right == null) return null;
+      return left * 100 + right;
+    }
+    m = token.match(/^(een|twee|drie|vier|vijf|zes|zeven|acht|negen)en(twintig|dertig|veertig|vijftig|zestig|zeventig|tachtig|negentig)$/);
+    if (m) return UNITS[m[1]] + TENS[m[2]];
+    return null;
+  }
+
+  function tryArithmetic(raw) {
+    var src = normalizeWord(raw);
+    if (!src) return null;
+    src = src.replace(/[?!]+/g, " ");
+    src = src.replace(/^(nou|eens|maar|zeg|eh)\s+/g, "");
+    src = src.replace(/hoeveel is het|hoeveel is|hoeveel is dat|wat is de uitkomst van|wat is|reken uit|bereken|reken/g, " ");
+    src = src.replace(/gedeeld door|delen door|gedeelde door/g, " / ");
+    src = src.replace(/procent van|% van/g, " %van ");
+    src = src.replace(/procent/g, " % ");
+    src = src.replace(/(\d)\s*[x×]\s*(\d)/g, "$1 * $2");
+    src = src.replace(/\s+[x×]\s+/g, " * ");
+    src = src.replace(/keer|maal/g, " * ");
+    src = src.replace(/plus/g, " + ");
+    src = src.replace(/\bminus\b|\bmin\b/g, " - ");
+    src = src.replace(/[×]/g, " * ");
+    src = src.trim();
+    if (!src) return null;
+    if (!/[+\-*/]|%van|%/.test(src)) return null;
+
+    var tokens = [];
+    var i = 0;
+    var s = src.replace(/\s+/g, " ").trim();
+    while (i < s.length) {
+      if (s[i] === " ") { i++; continue; }
+      if (s.slice(i, i + 4) === "%van") { tokens.push("%van"); i += 4; continue; }
+      if ("+-*/%".indexOf(s[i]) !== -1) { tokens.push(s[i]); i++; continue; }
+      var rest = s.slice(i);
+      var m = rest.match(/^\d+(?:\.\d+)?/);
+      if (m) {
+        tokens.push(parseFloat(m[0]));
+        i += m[0].length;
+        continue;
+      }
+      m = rest.match(/^[a-z]+/);
+      if (m) {
+        var num = parseDutchNumberToken(m[0]);
+        if (num == null) return null;
+        tokens.push(num);
+        i += m[0].length;
+        continue;
+      }
+      return null;
+    }
+    if (tokens.length < 3) return null;
+    var hasOp = tokens.some(function (tok) { return typeof tok === "string"; });
+    var hasNum = tokens.some(function (tok) { return typeof tok === "number"; });
+    if (!hasOp || !hasNum) return null;
+
+    function apply(seq, ops, fn) {
+      var out = [];
+      var j = 0;
+      while (j < seq.length) {
+        if (typeof seq[j] === "string" && ops.indexOf(seq[j]) !== -1 && out.length && j + 1 < seq.length && typeof out[out.length - 1] === "number" && typeof seq[j + 1] === "number") {
+          var a = out.pop();
+          var b = seq[j + 1];
+          var r = fn(seq[j], a, b);
+          if (r == null || !isFinite(r)) return null;
+          out.push(r);
+          j += 2;
+        } else {
+          out.push(seq[j]);
+          j++;
+        }
+      }
+      return out;
+    }
+
+    var seq = tokens;
+    seq = apply(seq, ["%van"], function (op, a, b) { return (a / 100) * b; });
+    if (!seq) return null;
+    seq = apply(seq, ["%"], function (op, a, b) { return (a / 100) * b; });
+    if (!seq) return null;
+    seq = apply(seq, ["*", "/"], function (op, a, b) {
+      if (op === "/") {
+        if (b === 0) return null;
+        return a / b;
+      }
+      return a * b;
+    });
+    if (!seq) return null;
+    seq = apply(seq, ["+", "-"], function (op, a, b) { return op === "+" ? a + b : a - b; });
+    if (!seq || seq.length !== 1 || typeof seq[0] !== "number" || !isFinite(seq[0])) return null;
+    var val = seq[0];
+    var shown = Math.abs(val - Math.round(val)) < 1e-10 ? String(Math.round(val)) : String(Math.round(val * 1000) / 1000).replace(".", ",");
+    return { type: "chat", text: "Dat is " + shown + ".", value: val };
+  }
+
   function extractSearchQuery(raw) {
     var q = String(raw || "").trim();
     q = q.replace(/^(ik ben (er )?op zoek naar|ik zoek naar|ik zoek|zoek eens naar|zoek naar|zoek maar|zoek|search for|search)\s+/i, "");
     return q.trim() || String(raw || "").trim();
+  }
+
+  function isSpotifyIntent(t) {
+    return /\b(zet spotify aan|spotify aan|open spotify|start spotify|start spotify op|zet spotify op|speel (wat |eens )?muziek|zet (de )?muziek aan|muziek aan|speel spotify|spotify spelen)\b/.test(t) ||
+      t === "spotify" || t === "muziek";
+  }
+
+  function getShortcutName() {
+    if (shortcutInput && shortcutInput.value.trim()) return shortcutInput.value.trim();
+    try {
+      var saved = window.localStorage.getItem(SHORTCUT_KEY);
+      if (saved) return saved.trim();
+    } catch (err) {}
+    return "";
+  }
+
+  function spotifyOpenUrl() {
+    var name = getShortcutName();
+    if (name) return "shortcuts://run-shortcut?name=" + encodeURIComponent(name);
+    return "spotify:";
+  }
+
+  function tryOpenUrl(url) {
+    state.lastOpenUrl = url || "";
+    if (!url || isShotMode()) return false;
+    var local = location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.protocol === "http:";
+    if (local && !/^https?:/i.test(url)) return false;
+    try {
+      window.location.href = url;
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function makeSpotifyButton() {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "open-spotify";
+    btn.textContent = getShortcutName() ? "Start opdracht" : "Open Spotify";
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      activity();
+      var url = spotifyOpenUrl();
+      if (!tryOpenUrl(url) && url.indexOf("shortcuts://") !== 0) {
+        tryOpenUrl("https://open.spotify.com/");
+      }
+    });
+    return btn;
+  }
+
+  function handleSpotify() {
+    var name = getShortcutName();
+    var text = name
+      ? "Ik start je opdracht. Tik op de knop als het niet vanzelf gaat."
+      : "Ik open Spotify. Tik op de knop als het niet vanzelf gaat. Met een opdracht in Opdrachten kan de muziek écht starten.";
+    bubble(text, "bot", { sticky: true, action: makeSpotifyButton() });
+    tryOpenUrl(spotifyOpenUrl());
+    return speak(text).then(function () {
+      return { type: "spotify", url: state.lastOpenUrl };
+    });
   }
 
   function classifyQuery(raw) {
@@ -495,6 +731,9 @@
     if (/\b(vertel (eens )?(een )?mop|een mopje|een grapje|een grap|maak me aan het lachen)\b/.test(t) || t === "mop" || t === "grapje" || t === "grap") {
       return { type: "chat", text: JOKES[Math.floor(Math.random() * JOKES.length)] };
     }
+    if (isSpotifyIntent(t)) return { type: "spotify" };
+    var math = tryArithmetic(raw);
+    if (math) return math;
     return { type: "search", query: extractSearchQuery(raw) };
   }
 
@@ -596,7 +835,7 @@
     var q = String(query || "").trim();
     if (!q) return Promise.resolve([]);
     startThinking();
-    bubble("Ik zoek het voor je.");
+    bubble("Ik zoek het voor je.", "bot", { sticky: true });
     return Promise.allSettled([searchWikipedia(q), searchDuckDuckGo(q)])
       .then(function (parts) {
         var items = [];
@@ -611,23 +850,16 @@
           });
         });
         renderResults(items);
-        if (!items.length) {
-          var miss = "Ik vond niks. Probeer andere woorden.";
-          bubble(miss);
-          speak(miss);
-        } else {
-          var say = "Ik vond " + items.length + (items.length === 1 ? " resultaat" : " resultaten") +
-            " over " + q + ".";
-          bubble(say);
-          speak(say);
-        }
-        return items;
+        var say = !items.length
+          ? "Ik vond niks. Probeer andere woorden."
+          : "Ik vond " + items.length + (items.length === 1 ? " resultaat" : " resultaten") + " over " + q + ".";
+        bubble(say, "bot", { sticky: true });
+        return speak(say).then(function () { return items; });
       })
       .catch(function () {
         var miss = "Zoeken lukte even niet. Probeer het zo nog eens.";
-        bubble(miss);
-        speak(miss);
-        return [];
+        bubble(miss, "bot", { sticky: true });
+        return speak(miss).then(function () { return []; });
       })
       .finally(function () {
         stopThinking();
@@ -639,15 +871,21 @@
     var q = String(raw || "").trim();
     if (!q) return Promise.resolve();
     activity();
-    input.value = q;
     smileOn(true);
     var kind = classifyQuery(q);
+    if (kind.type === "spotify") {
+      return handleSpotify().then(function (res) {
+        setTimeout(function () { smileOn(false); stopThinking(); }, 700);
+        return res;
+      });
+    }
     if (kind.type === "chat") {
       clearResults();
-      bubble(kind.text);
-      speak(kind.text);
-      setTimeout(function () { smileOn(false); stopThinking(); }, 700);
-      return Promise.resolve(kind);
+      bubble(kind.text, "bot", { sticky: true });
+      return speak(kind.text).then(function () {
+        setTimeout(function () { smileOn(false); stopThinking(); }, 400);
+        return kind;
+      });
     }
     return searchInApp(kind.query || q).then(function (items) {
       return { type: "search", query: kind.query || q, items: items };
@@ -660,47 +898,161 @@
     voiceHint.hidden = !text;
   }
 
+  function setListenStatus(text) {
+    if (!listenStatus) return;
+    listenStatus.textContent = text || "luistert…";
+    listenStatus.hidden = !text;
+  }
+
+  function clearSilenceTimer() {
+    if (state.silenceTimer) {
+      clearTimeout(state.silenceTimer);
+      state.silenceTimer = null;
+    }
+  }
+
+  function clearDictateTimer() {
+    if (state.dictateTimer) {
+      clearTimeout(state.dictateTimer);
+      state.dictateTimer = null;
+    }
+  }
+
   function setListening(on) {
     state.listening = !!on;
     document.body.classList.toggle("listening", !!on);
-    if (micBtn) micBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (micBtn) {
+      micBtn.setAttribute("aria-pressed", on || state.conversation ? "true" : "false");
+      micBtn.setAttribute("aria-label", state.conversation ? "Stoppen" : "Praten");
+      micBtn.title = state.conversation ? "Stoppen" : "Praat met het poppetje";
+    }
     if (on) {
       activity();
       if (!state.phonesOn) setHeadphones(true, false);
       setLook(0, 0.2, 200);
-    } else {
+      setListenStatus("luistert…");
+    } else if (!state.conversation) {
       setLook(0, 0, 240);
+      setListenStatus("");
+    } else {
+      setListenStatus(state.speaking ? "" : "luistert…");
     }
   }
 
-  function stopListening() {
+  function stopRecognitionOnly() {
     if (state.recognition) {
       try { state.recognition.abort(); } catch (err) {}
       state.recognition = null;
     }
+  }
+
+  function stopListening() {
+    clearSilenceTimer();
+    stopRecognitionOnly();
     setListening(false);
   }
 
+  function endConversation() {
+    state.conversation = false;
+    state.dictationMode = false;
+    state.pendingTranscript = "";
+    clearSilenceTimer();
+    clearDictateTimer();
+    stopRecognitionOnly();
+    setListening(false);
+    setListenStatus("");
+    showVoiceHint("");
+    if (micBtn) {
+      micBtn.setAttribute("aria-pressed", "false");
+      micBtn.setAttribute("aria-label", "Praten");
+      micBtn.title = "Praat met het poppetje";
+    }
+  }
+
   function dictationFallback(reason) {
-    stopListening();
+    stopRecognitionOnly();
+    setListening(false);
+    state.dictationMode = true;
     var msg = isStandalone()
-      ? "In de app op je beginscherm werkt de microfoonknop vaak niet. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord."
-      : "Spraakherkenning is hier niet beschikbaar. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord.";
+      ? "In de app op je beginscherm werkt de microfoonknop vaak niet. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord. Na een korte stilte antwoord ik vanzelf."
+      : "Spraakherkenning is hier niet beschikbaar. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord. Na een korte stilte antwoord ik vanzelf.";
     showVoiceHint(msg);
-    bubble("Zeg het maar via het toetsenbord.");
+    setListenStatus("zeg het maar…");
     try { input.focus(); } catch (err) {}
   }
 
-  function startListening() {
+  function submitUtterance(raw) {
+    var q = String(raw || input.value || "").trim();
+    if (!q || state.submitLock) return Promise.resolve();
+    state.submitLock = true;
+    clearSilenceTimer();
+    clearDictateTimer();
+    state.pendingTranscript = "";
+    stopRecognitionOnly();
+    setListening(false);
+    thinkLinesShown = false;
+    bubble(q, "user", { sticky: true });
+    input.value = "";
+    return handleQuery(q, true).then(function (res) {
+      input.value = "";
+      return res;
+    }).catch(function () {
+      return null;
+    }).then(function (res) {
+      state.submitLock = false;
+      input.value = "";
+      if (state.conversation && speechRecCtor()) {
+        setTimeout(function () { resumeListening(); }, 280);
+      } else if (state.conversation || state.dictationMode) {
+        state.dictationMode = true;
+        setListenStatus("zeg het maar…");
+        try { input.focus(); } catch (err) {}
+      }
+      return res;
+    });
+  }
+
+  function scheduleVoiceSubmit(text) {
+    state.pendingTranscript = text;
+    clearSilenceTimer();
+    state.silenceTimer = setTimeout(function () {
+      state.silenceTimer = null;
+      submitUtterance(state.pendingTranscript);
+    }, 1000);
+  }
+
+  function scheduleDictationSubmit() {
+    if (!(state.conversation || state.dictationMode)) return;
+    if (state.listening && state.recognition) return;
+    if (state.submitLock) return;
+    if (document.activeElement !== input) return;
+    clearDictateTimer();
+    if (!input.value.trim()) return;
+    state.dictateTimer = setTimeout(function () {
+      state.dictateTimer = null;
+      if (!(state.conversation || state.dictationMode) || state.submitLock) return;
+      if (document.activeElement !== input) return;
+      var q = input.value.trim();
+      if (q) submitUtterance(q);
+    }, 1200);
+  }
+
+  function resumeListening() {
+    if (!state.conversation || state.submitLock || state.speaking) return;
+    if (!speechRecCtor()) {
+      dictationFallback("unsupported");
+      return;
+    }
+    startRecognition(true);
+  }
+
+  function startRecognition(isResume) {
     var Ctor = speechRecCtor();
     if (!Ctor) {
       dictationFallback("unsupported");
       return;
     }
-    if (state.listening) {
-      stopListening();
-      return;
-    }
+    if (state.recognition) return;
     showVoiceHint("");
     var rec;
     try {
@@ -715,41 +1067,79 @@
     rec.maxAlternatives = 1;
     rec.onstart = function () {
       setListening(true);
-      bubble("Ik luister…");
     };
     rec.onresult = function (event) {
       var text = "";
-      var finalText = "";
       var i;
-      for (i = event.resultIndex; i < event.results.length; i++) {
-        var piece = event.results[i][0].transcript;
-        text += piece;
-        if (event.results[i].isFinal) finalText += piece;
+      for (i = 0; i < event.results.length; i++) {
+        text += event.results[i][0].transcript;
       }
-      if (text) input.value = text.trim();
-      if (finalText.trim()) {
-        stopListening();
-        handleQuery(finalText.trim(), true);
+      text = text.trim();
+      if (text) {
+        input.value = text;
+        scheduleVoiceSubmit(text);
       }
     };
     rec.onerror = function (event) {
       var err = (event && event.error) || "error";
-      if (err === "aborted" || err === "no-speech") {
-        stopListening();
+      if (err === "aborted") return;
+      if (err === "no-speech") return;
+      if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture") {
+        dictationFallback(err);
         return;
       }
+      if (state.conversation) return;
       dictationFallback(err);
     };
     rec.onend = function () {
-      if (state.recognition === rec) setListening(false);
-      state.recognition = null;
+      if (state.recognition === rec) state.recognition = null;
+      if (state.submitLock) return;
+      if (state.pendingTranscript && !state.silenceTimer) {
+        scheduleVoiceSubmit(state.pendingTranscript);
+        return;
+      }
+      if (state.conversation && !state.silenceTimer && !state.speaking) {
+        setTimeout(function () {
+          if (state.conversation && !state.recognition && !state.submitLock && !state.speaking) {
+            resumeListening();
+          }
+        }, 240);
+      }
     };
     state.recognition = rec;
     try {
       rec.start();
     } catch (err) {
+      state.recognition = null;
+      if (isResume && state.conversation) {
+        setListening(false);
+        showVoiceHint("Tik nog eens op de microfoon om verder te praten.");
+        setListenStatus("");
+        return;
+      }
       dictationFallback("start");
     }
+  }
+
+  function startConversation() {
+    state.conversation = true;
+    state.dictationMode = false;
+    state.pendingTranscript = "";
+    showVoiceHint("");
+    setListenStatus("luistert…");
+    if (micBtn) {
+      micBtn.setAttribute("aria-pressed", "true");
+      micBtn.setAttribute("aria-label", "Stoppen");
+    }
+    startRecognition(false);
+  }
+
+  function startListening() {
+    if (state.conversation || state.listening) {
+      endConversation();
+      return;
+    }
+    startConversation();
   }
 
   form.addEventListener("submit", function (e) {
@@ -757,7 +1147,7 @@
     e.stopPropagation();
     var q = input.value.trim();
     if (!q) return;
-    handleQuery(q, false);
+    submitUtterance(q);
   });
 
   if (micBtn) {
@@ -769,6 +1159,18 @@
     });
   }
 
+  if (shortcutInput) {
+    try {
+      var savedName = window.localStorage.getItem(SHORTCUT_KEY);
+      if (savedName) shortcutInput.value = savedName;
+    } catch (err) {}
+    shortcutInput.addEventListener("change", function () {
+      try { window.localStorage.setItem(SHORTCUT_KEY, shortcutInput.value.trim()); } catch (err) {}
+    });
+    shortcutInput.addEventListener("blur", function () {
+      try { window.localStorage.setItem(SHORTCUT_KEY, shortcutInput.value.trim()); } catch (err) {}
+    });
+  }
 
   input.addEventListener("input", onType);
   input.addEventListener("focus", function () {
@@ -779,7 +1181,7 @@
   input.addEventListener("blur", function () {
     thinkLinesShown = false;
     if (state.thinking) stopThinking();
-    else setLook(0, 0, 280);
+    else if (!state.listening) setLook(0, 0, 280);
   });
 
   function clearHold() {
@@ -931,7 +1333,7 @@
 
   var idleRunning = false;
   setInterval(function () {
-    if (reduced || idleRunning || state.thinking || state.listening || state.pointerId !== null) return;
+    if (reduced || idleRunning || state.thinking || state.listening || state.conversation || state.speaking || state.pointerId !== null) return;
     if (now() - state.lastActivity < IDLE_MS) return;
     idleRunning = true;
     var fn = idleAnims[Math.floor(Math.random() * idleAnims.length)];
@@ -979,8 +1381,14 @@
     searchInApp: searchInApp,
     startListening: startListening,
     stopListening: stopListening,
+    startConversation: startConversation,
+    endConversation: endConversation,
+    submitUtterance: submitUtterance,
+    tryArithmetic: tryArithmetic,
     speak: speak,
-    classifyQuery: classifyQuery
+    classifyQuery: classifyQuery,
+    getShortcutName: getShortcutName,
+    tryOpenUrl: tryOpenUrl
   };
 
   function greet() {
