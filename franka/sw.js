@@ -1,5 +1,5 @@
 /* Franka — network-first service worker for offline use. */
-var CACHE = "ejz-franka-v9-live";
+var CACHE = "ejz-franka-v10";
 var ASSETS = [
   "./",
   "./index.html",

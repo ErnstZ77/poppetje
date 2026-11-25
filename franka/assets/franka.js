@@ -5,12 +5,14 @@
 (function () {
   "use strict";
 
-  var VERSION = "v9-live";
+  var VERSION = "v10";
   var canvas = document.getElementById("face");
   var ctx = canvas.getContext("2d");
   var faceWrap = document.getElementById("face-wrap");
   var stage = document.getElementById("stage");
   var bubbles = document.getElementById("bubbles");
+  var chat = document.getElementById("chat");
+  var resultsEl = document.getElementById("results");
   var input = document.getElementById("q");
   var CW = 192, CH = 208;
   var BLINK_MS = 65; /* korte, natuurlijke knipper (frames 1-4 van idle) */
@@ -59,7 +61,8 @@
     var a = anim(name);
     if (!a) return;
     face.blink = null;
-    face.oneShot = { name: name, frame: 0, until: performance.now() + (reduced ? 600 : a.durations_ms[0]), then: then || null };
+    var slow = (name === "review" || name === "failed") ? 1.35 : 1;
+    face.oneShot = { name: name, frame: 0, slow: slow, until: performance.now() + (reduced ? 600 : a.durations_ms[0] * slow), then: then || null };
   }
 
   function setMode(mode) {
@@ -81,7 +84,7 @@
         if (reduced) { os.frame = a.frames; }
         else {
           os.frame += 1;
-          if (os.frame < a.frames) os.until = now + a.durations_ms[os.frame];
+          if (os.frame < a.frames) os.until = now + a.durations_ms[os.frame] * (os.slow || 1);
         }
       }
       if (os.frame >= a.frames) {
@@ -178,9 +181,23 @@
     if (!reduced && el.animate) {
       el.animate([{ opacity: 0, transform: "translateY(12px) scale(0.92)" }, { opacity: 1, transform: "none" }], { duration: 260, easing: "cubic-bezier(.2,.9,.3,1.2)" });
     }
-    while (bubbles.children.length > 8) bubbles.removeChild(bubbles.firstChild);
-    try { bubbles.scrollTop = bubbles.scrollHeight; } catch (err) {}
+    while (bubbles.children.length > 12) bubbles.removeChild(bubbles.firstChild);
+    updateChatting();
     return row;
+  }
+
+  function updateChatting() {
+    var on = bubbles.querySelectorAll(".bubble-row.user").length > 0 || !resultsEl.hidden;
+    document.body.classList.toggle("chatting", on);
+    requestAnimationFrame(function () { try { chat.scrollTop = chat.scrollHeight; } catch (err) {} });
+  }
+
+  function cssOnce(cls) {
+    if (reduced) return;
+    faceWrap.classList.remove(cls);
+    void faceWrap.offsetWidth;
+    faceWrap.classList.add(cls);
+    setTimeout(function () { faceWrap.classList.remove(cls); }, 1000);
   }
 
   /* ---------- engine ---------- */
@@ -190,7 +207,8 @@
     voice: "female",
     micLabel: "Praat met Franka",
     persona: {
-      hello: "Hoi Ernst! Waar zullen we het over hebben?",
+      name: "franka",
+      hello: "Hoi Ernst! Wat kan ik voor je doen?",
       whoami: "Ik ben Franka. Ik denk graag met je mee.",
       howAreYou: "Goed hoor, en met jou?",
       thanks: "Graag gedaan."
@@ -205,7 +223,9 @@
       shortcutInput: document.getElementById("shortcut-name"),
       debugToggle: document.getElementById("voice-debug"),
       debugLog: document.getElementById("voice-debug-log"),
-      tapContinue: document.getElementById("tap-continue")
+      tapContinue: document.getElementById("tap-continue"),
+      speakToggle: document.getElementById("speak-aloud"),
+      chat: chat
     },
     hooks: {
       bubble: bubble,
@@ -218,8 +238,9 @@
       },
       onSpeakEnd: function () { document.body.classList.remove("speaking"); },
       onPlayful: function () { playOnce("waiting"); },
-      onDone: function () { setMode("rust"); playOnce("review"); },
-      onError: function () { setMode("rust"); playOnce("failed"); },
+      onDone: function () { setMode("rust"); playOnce("review"); cssOnce("nod"); },
+      onError: function () { setMode("rust"); playOnce("failed"); cssOnce("shake"); },
+      onChatChange: updateChatting,
       activity: function () { state.lastActivity = Date.now(); }
     }
   });
