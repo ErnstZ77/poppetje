@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F8F9FD">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Een interactief EJZ-poppetje voor op je iPhone-beginscherm.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Poppetje">
+  <meta name="format-detection" content="telephone=no">
+  <title>EJZ Poppetje</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="top">
+      <p class="kicker">EJZ</p>
+      <h1>poppetje</h1>
+    </header>
+
+    <main class="stage" id="stage">
+      <div class="bubbles" id="bubbles" aria-live="polite"></div>
+
+      <div class="mascot" id="mascot" role="img" aria-label="EJZ-poppetje. Tik, veeg of houd vast.">
+        <div class="shadow" id="shadow"></div>
+        <svg class="character" viewBox="0 0 200 200" aria-hidden="true" focusable="false">
+          <g id="char" transform="rotate(-8 100 108)">
+            <circle id="head" cx="100" cy="108" r="62" fill="#000000"/>
+            <g id="phones">
+              <path class="band-arc" d="M 30.46 82.69 A 74 74 0 0 1 169.54 82.69" fill="none" stroke="#3F8C66" stroke-width="14" stroke-linecap="round"/>
+              <rect id="cup-l" x="16" y="86" width="28" height="52" rx="14" fill="#3F8C66"/>
+              <rect id="cup-r" x="156" y="86" width="28" height="52" rx="14" fill="#3F8C66"/>
+              <g id="mic-arm">
+                <path d="M 36 128 Q 44 144 63 143" fill="none" stroke="#3F8C66" stroke-width="6" stroke-linecap="round"/>
+                <rect id="mic-tip" x="52" y="136" width="22" height="14" rx="7" fill="#3F8C66"/>
+              </g>
+            </g>
+            <g id="face">
+              <g transform="rotate(8 103.5 105)"><rect id="eye-l" x="96" y="90" width="15" height="30" rx="7.5" fill="#ffffff"/></g>
+              <g transform="rotate(8 131.5 105)"><rect id="eye-r" x="124" y="90" width="15" height="30" rx="7.5" fill="#ffffff"/></g>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </main>
+
+    <p class="hint" id="hint">tik · veeg · houd vast · kantel</p>
+
+    <form class="search" id="search-form" action="https://www.google.com/search" method="get" target="_blank" rel="noopener">
+      <label class="sr-only" for="q">Zoeken op Google</label>
+      <input id="q" name="q" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Wat zoek je?" maxlength="200">
+      <button type="submit" class="go" aria-label="Zoek op Google">Zoek</button>
+    </form>
+
+    <button type="button" class="tilt-btn" id="tilt-btn" hidden>Kantelen aanzetten</button>
+  </div>
+
+  <script src="assets/anime.min.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
