@@ -400,6 +400,35 @@ body.listening .mic-btn {
   line-height: 1.35;
   color: var(--muted);
 }
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.settings-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--green);
+}
+.voice-debug {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #111111;
+  color: #C8F0D8;
+  font-size: 11px;
+  line-height: 1.4;
+  max-height: 16vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.voice-debug[hidden] { display: none !important; }
 
 .results {
   flex: 0 1 auto;
@@ -513,7 +542,8 @@ body.icon-mode .bubbles,
 body.icon-mode .results,
 body.icon-mode .voice-hint,
 body.icon-mode .listen-status,
-body.icon-mode .settings { display: none !important; }
+body.icon-mode .settings,
+body.icon-mode .voice-debug { display: none !important; }
 body.icon-mode .stage {
   flex: none;
   width: 100%;
@@ -546,7 +576,8 @@ body.closeup-mode .bubbles,
 body.closeup-mode .results,
 body.closeup-mode .voice-hint,
 body.closeup-mode .listen-status,
-body.closeup-mode .settings { display: none !important; }
+body.closeup-mode .settings,
+body.closeup-mode .voice-debug { display: none !important; }
 body.closeup-mode .stage {
   flex: none;
   width: 100%;

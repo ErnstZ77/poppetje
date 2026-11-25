@@ -22,8 +22,14 @@
   var voiceHint = document.getElementById("voice-hint");
   var listenStatus = document.getElementById("listen-status");
   var shortcutInput = document.getElementById("shortcut-name");
+  var voiceDebugToggle = document.getElementById("voice-debug");
+  var voiceDebugLogEl = document.getElementById("voice-debug-log");
   var tiltBtn = document.getElementById("tilt-btn");
   var SHORTCUT_KEY = "poppetje-shortcut-name";
+  var DEBUG_KEY = "poppetje-voice-debug";
+  var SILENCE_MS = 1000;
+  var NO_RESULT_MS = 8000;
+  var START_WATCH_MS = 1500;
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", function (e) {
@@ -57,8 +63,14 @@
     dictateTimer: null,
     speaking: false,
     submitLock: false,
-    lastOpenUrl: ""
+    lastOpenUrl: "",
+    noResultTimer: null,
+    startWatchTimer: null,
+    gotResult: false,
+    speechUnlocked: false,
+    lastTranscriptAt: 0
   };
+  var voiceDebugLines = [];
 
   var IDLE_MS = 5000;
   var HOLD_MS = 460;
@@ -420,7 +432,7 @@
   }
 
 
-  var VERSION = "v6-chat";
+  var VERSION = "v7-listen";
   var JOKES = [
     "Waarom hebben wastafels geen geheimen? Omdat ze alles laten weglopen.",
     "Wat zei de stoel tegen de tafel? Blijf zitten, ik sta er wel.",
@@ -461,8 +473,24 @@
     }
   }
 
+  function unlockSpeech() {
+    if (state.speechUnlocked || !window.speechSynthesis) return;
+    try {
+      var u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      u.rate = 1;
+      u.lang = "nl-NL";
+      speechSynthesis.speak(u);
+      state.speechUnlocked = true;
+      voiceLog("unlockSpeech");
+    } catch (err) {
+      voiceLog("unlockSpeech-error", err && err.message);
+    }
+  }
+
   function speak(text) {
     return new Promise(function (resolve) {
+      stopRecognitionOnly();
       if (!text || !window.speechSynthesis || isShotMode()) {
         resolve();
         return;
@@ -904,6 +932,60 @@
     listenStatus.hidden = !text;
   }
 
+  function renderVoiceDebug() {
+    if (!voiceDebugLogEl) return;
+    var on = !!(voiceDebugToggle && voiceDebugToggle.checked);
+    voiceDebugLogEl.hidden = !on;
+    if (on) {
+      voiceDebugLogEl.textContent = voiceDebugLines.join("\n") || "Nog geen spraak-events.";
+      try { voiceDebugLogEl.scrollTop = voiceDebugLogEl.scrollHeight; } catch (err) {}
+    }
+  }
+
+  function voiceLog(event, detail) {
+    var time = new Date().toLocaleTimeString("nl-NL", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "Europe/Amsterdam"
+    });
+    var line = time + "  " + event + (detail ? "  " + detail : "");
+    voiceDebugLines.push(line);
+    if (voiceDebugLines.length > 40) voiceDebugLines.shift();
+    renderVoiceDebug();
+  }
+
+  function readTranscript(event) {
+    var text = "";
+    var finalText = "";
+    var results = event && event.results;
+    if (!results) return { text: "", finalText: "", hasFinal: false };
+    var len = results.length;
+    var i;
+    for (i = 0; i < len; i++) {
+      var res = results[i];
+      var alt = null;
+      if (res) {
+        alt = res[0] || (typeof res.item === "function" ? res.item(0) : null);
+      }
+      var piece = alt && alt.transcript != null ? String(alt.transcript) : "";
+      text += piece;
+      if (res && res.isFinal) finalText += piece;
+    }
+    text = text.trim();
+    finalText = finalText.trim();
+    return { text: text, finalText: finalText, hasFinal: !!finalText };
+  }
+
+  function showHeard(text) {
+    if (text) {
+      input.value = text;
+      setListenStatus("luistert… " + text);
+    } else if (state.listening || state.conversation) {
+      setListenStatus("luistert…");
+    }
+  }
+
   function clearSilenceTimer() {
     if (state.silenceTimer) {
       clearTimeout(state.silenceTimer);
@@ -918,6 +1000,77 @@
     }
   }
 
+  function clearNoResultTimer() {
+    if (state.noResultTimer) {
+      clearTimeout(state.noResultTimer);
+      state.noResultTimer = null;
+    }
+  }
+
+  function clearStartWatch() {
+    if (state.startWatchTimer) {
+      clearTimeout(state.startWatchTimer);
+      state.startWatchTimer = null;
+    }
+  }
+
+  function armNoResultTimer() {
+    clearNoResultTimer();
+    state.gotResult = false;
+    state.noResultTimer = setTimeout(function () {
+      state.noResultTimer = null;
+      if (state.submitLock) return;
+      if (state.pendingTranscript) {
+        voiceLog("no-result-timeout", "submit pending");
+        submitUtterance(state.pendingTranscript);
+        return;
+      }
+      voiceLog("no-result-timeout", "empty");
+      heardNothing();
+    }, NO_RESULT_MS);
+  }
+
+  function heardNothing() {
+    clearSilenceTimer();
+    clearNoResultTimer();
+    stopRecognitionOnly();
+    setListening(false);
+    var msg = "Ik hoorde niets, tik nog eens op de microfoon of gebruik het toetsenbord-microfoontje.";
+    showVoiceHint(msg);
+    bubble(msg, "bot", { sticky: true });
+    setListenStatus("");
+    state.dictationMode = true;
+    try { input.focus(); } catch (err) {}
+  }
+
+  function askTapAgain(reason) {
+    clearStartWatch();
+    clearNoResultTimer();
+    stopRecognitionOnly();
+    setListening(false);
+    setListenStatus("");
+    showVoiceHint("Tik nog eens op de microfoon om verder te praten.");
+    voiceLog("need-tap", reason || "");
+  }
+
+  function errorMessage(code) {
+    if (code === "not-allowed" || code === "service-not-allowed" || code === "audio-capture") {
+      return "Geen toegang tot de microfoon. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord.";
+    }
+    if (code === "no-speech") {
+      return "Ik hoorde niets, tik nog eens op de microfoon of gebruik het toetsenbord-microfoontje.";
+    }
+    if (code === "network") {
+      return "De spraakherkenning heeft even geen netwerk. Probeer het opnieuw of dicteer via het toetsenbord.";
+    }
+    if (code === "unsupported" || code === "construct" || code === "start") {
+      return isStandalone()
+        ? "In de app op je beginscherm werkt de microfoonknop vaak niet. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord. Na een korte stilte antwoord ik vanzelf."
+        : "Spraakherkenning is hier niet beschikbaar. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord. Na een korte stilte antwoord ik vanzelf.";
+    }
+    return "Spraakherkenning gaf een fout (" + code + "). Tik nog eens op de microfoon of dicteer via het toetsenbord.";
+  }
+
   function setListening(on) {
     state.listening = !!on;
     document.body.classList.toggle("listening", !!on);
@@ -930,24 +1083,27 @@
       activity();
       if (!state.phonesOn) setHeadphones(true, false);
       setLook(0, 0.2, 200);
-      setListenStatus("luistert…");
-    } else if (!state.conversation) {
-      setLook(0, 0, 240);
-      setListenStatus("");
+      if (state.pendingTranscript) showHeard(state.pendingTranscript);
+      else setListenStatus("luistert…");
     } else {
-      setListenStatus(state.speaking ? "" : "luistert…");
+      if (!state.conversation) setLook(0, 0, 240);
+      if (state.dictationMode && !state.speaking) setListenStatus("zeg het maar…");
+      else setListenStatus("");
     }
   }
 
   function stopRecognitionOnly() {
     if (state.recognition) {
-      try { state.recognition.abort(); } catch (err) {}
+      var rec = state.recognition;
       state.recognition = null;
+      try { rec.abort(); } catch (err) {}
     }
   }
 
   function stopListening() {
     clearSilenceTimer();
+    clearNoResultTimer();
+    clearStartWatch();
     stopRecognitionOnly();
     setListening(false);
   }
@@ -958,6 +1114,8 @@
     state.pendingTranscript = "";
     clearSilenceTimer();
     clearDictateTimer();
+    clearNoResultTimer();
+    clearStartWatch();
     stopRecognitionOnly();
     setListening(false);
     setListenStatus("");
@@ -967,36 +1125,42 @@
       micBtn.setAttribute("aria-label", "Praten");
       micBtn.title = "Praat met het poppetje";
     }
+    voiceLog("endConversation");
   }
 
   function dictationFallback(reason) {
+    clearStartWatch();
+    clearNoResultTimer();
     stopRecognitionOnly();
     setListening(false);
     state.dictationMode = true;
-    var msg = isStandalone()
-      ? "In de app op je beginscherm werkt de microfoonknop vaak niet. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord. Na een korte stilte antwoord ik vanzelf."
-      : "Spraakherkenning is hier niet beschikbaar. Tik in het zoekveld en daarna op het microfoontje op het toetsenbord. Na een korte stilte antwoord ik vanzelf.";
+    var msg = errorMessage(reason || "unsupported");
     showVoiceHint(msg);
     setListenStatus("zeg het maar…");
+    voiceLog("dictationFallback", reason || "");
     try { input.focus(); } catch (err) {}
   }
 
   function submitUtterance(raw) {
-    var q = String(raw || input.value || "").trim();
+    var q = String(raw || state.pendingTranscript || input.value || "").trim();
     if (!q || state.submitLock) return Promise.resolve();
     state.submitLock = true;
     clearSilenceTimer();
     clearDictateTimer();
+    clearNoResultTimer();
+    clearStartWatch();
     state.pendingTranscript = "";
     stopRecognitionOnly();
     setListening(false);
     thinkLinesShown = false;
     bubble(q, "user", { sticky: true });
     input.value = "";
+    voiceLog("submit", q);
     return handleQuery(q, true).then(function (res) {
       input.value = "";
       return res;
-    }).catch(function () {
+    }).catch(function (err) {
+      voiceLog("submit-error", err && err.message);
       return null;
     }).then(function (res) {
       state.submitLock = false;
@@ -1017,8 +1181,35 @@
     clearSilenceTimer();
     state.silenceTimer = setTimeout(function () {
       state.silenceTimer = null;
-      submitUtterance(state.pendingTranscript);
-    }, 1000);
+      if (state.submitLock) return;
+      var q = state.pendingTranscript || input.value.trim();
+      if (q) submitUtterance(q);
+    }, SILENCE_MS);
+  }
+
+  function noteTranscript(text, hasFinal) {
+    if (text) {
+      state.pendingTranscript = text;
+      state.lastTranscriptAt = Date.now();
+      showHeard(text);
+    }
+    if (hasFinal && text) {
+      voiceLog("final", text);
+      clearSilenceTimer();
+      submitUtterance(text);
+      return;
+    }
+    if (text) scheduleVoiceSubmit(text);
+  }
+
+  function submitIfPending(source) {
+    voiceLog(source);
+    if (state.submitLock) return;
+    var q = state.pendingTranscript || input.value.trim();
+    if (q) {
+      clearSilenceTimer();
+      submitUtterance(q);
+    }
   }
 
   function scheduleDictationSubmit() {
@@ -1054,6 +1245,7 @@
     }
     if (state.recognition) return;
     showVoiceHint("");
+    state.pendingTranscript = "";
     var rec;
     try {
       rec = new Ctor();
@@ -1066,39 +1258,51 @@
     rec.continuous = false;
     rec.maxAlternatives = 1;
     rec.onstart = function () {
+      clearStartWatch();
+      voiceLog("onstart");
       setListening(true);
+      armNoResultTimer();
     };
     rec.onresult = function (event) {
-      var text = "";
-      var i;
-      for (i = 0; i < event.results.length; i++) {
-        text += event.results[i][0].transcript;
-      }
-      text = text.trim();
-      if (text) {
-        input.value = text;
-        scheduleVoiceSubmit(text);
-      }
+      var got = readTranscript(event);
+      state.gotResult = true;
+      clearNoResultTimer();
+      voiceLog("onresult", (got.hasFinal ? "final " : "interim ") + (got.text || "(leeg)"));
+      noteTranscript(got.text || got.finalText, got.hasFinal);
+    };
+    rec.onspeechend = function () {
+      voiceLog("onspeechend");
+      if (state.pendingTranscript) scheduleVoiceSubmit(state.pendingTranscript);
+    };
+    rec.onaudioend = function () {
+      voiceLog("onaudioend");
+      if (state.pendingTranscript) scheduleVoiceSubmit(state.pendingTranscript);
     };
     rec.onerror = function (event) {
       var err = (event && event.error) || "error";
+      voiceLog("onerror", err);
       if (err === "aborted") return;
-      if (err === "no-speech") return;
-      if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture") {
-        dictationFallback(err);
+      if (state.submitLock) return;
+      if (err === "no-speech") {
+        if (state.pendingTranscript) {
+          submitUtterance(state.pendingTranscript);
+          return;
+        }
+        heardNothing();
         return;
       }
-      if (state.conversation) return;
       dictationFallback(err);
     };
     rec.onend = function () {
+      voiceLog("onend");
       if (state.recognition === rec) state.recognition = null;
+      clearStartWatch();
       if (state.submitLock) return;
-      if (state.pendingTranscript && !state.silenceTimer) {
-        scheduleVoiceSubmit(state.pendingTranscript);
+      if (state.pendingTranscript) {
+        submitIfPending("onend-submit");
         return;
       }
-      if (state.conversation && !state.silenceTimer && !state.speaking) {
+      if (state.conversation && !state.silenceTimer && !state.speaking && !state.dictationMode) {
         setTimeout(function () {
           if (state.conversation && !state.recognition && !state.submitLock && !state.speaking) {
             resumeListening();
@@ -1107,14 +1311,26 @@
       }
     };
     state.recognition = rec;
+    clearStartWatch();
+    state.startWatchTimer = setTimeout(function () {
+      state.startWatchTimer = null;
+      if (state.listening || state.submitLock) return;
+      voiceLog("start-timeout");
+      if (isResume && state.conversation) {
+        askTapAgain("no-onstart");
+        return;
+      }
+      dictationFallback("start");
+    }, START_WATCH_MS);
     try {
       rec.start();
+      voiceLog("start()");
     } catch (err) {
+      clearStartWatch();
       state.recognition = null;
+      voiceLog("start-throw", err && err.message);
       if (isResume && state.conversation) {
-        setListening(false);
-        showVoiceHint("Tik nog eens op de microfoon om verder te praten.");
-        setListenStatus("");
+        askTapAgain("start-throw");
         return;
       }
       dictationFallback("start");
@@ -1126,11 +1342,11 @@
     state.dictationMode = false;
     state.pendingTranscript = "";
     showVoiceHint("");
-    setListenStatus("luistert…");
     if (micBtn) {
       micBtn.setAttribute("aria-pressed", "true");
       micBtn.setAttribute("aria-label", "Stoppen");
     }
+    voiceLog("startConversation");
     startRecognition(false);
   }
 
@@ -1155,6 +1371,7 @@
       e.preventDefault();
       e.stopPropagation();
       activity();
+      unlockSpeech();
       startListening();
     });
   }
@@ -1169,6 +1386,17 @@
     });
     shortcutInput.addEventListener("blur", function () {
       try { window.localStorage.setItem(SHORTCUT_KEY, shortcutInput.value.trim()); } catch (err) {}
+    });
+  }
+
+  if (voiceDebugToggle) {
+    try {
+      voiceDebugToggle.checked = window.localStorage.getItem(DEBUG_KEY) === "1";
+    } catch (err) {}
+    renderVoiceDebug();
+    voiceDebugToggle.addEventListener("change", function () {
+      try { window.localStorage.setItem(DEBUG_KEY, voiceDebugToggle.checked ? "1" : "0"); } catch (err) {}
+      renderVoiceDebug();
     });
   }
 
@@ -1388,7 +1616,9 @@
     speak: speak,
     classifyQuery: classifyQuery,
     getShortcutName: getShortcutName,
-    tryOpenUrl: tryOpenUrl
+    tryOpenUrl: tryOpenUrl,
+    voiceLog: voiceLog,
+    readTranscript: readTranscript
   };
 
   function greet() {
