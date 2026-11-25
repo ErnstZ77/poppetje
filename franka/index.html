@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F4F2EE">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Franka — praat met haar, ze denkt mee en antwoordt hardop.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Franka">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="franka-version" content="v9-live">
+  <title>Franka</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="preload" as="image" href="assets/franka-sprites.webp">
+  <link rel="stylesheet" href="../assets/style.css">
+  <link rel="stylesheet" href="assets/franka.css">
+</head>
+<body class="franka">
+  <div class="app" id="app">
+    <header class="top">
+      <p class="kicker">EJZ</p>
+      <h1>Franka</h1>
+    </header>
+
+    <main class="stage" id="stage">
+      <div class="bubbles" id="bubbles" aria-live="polite"></div>
+      <div class="face-wrap" id="face-wrap" role="img" aria-label="Franka. Tik op haar of praat met haar.">
+        <div class="face-ring" aria-hidden="true"></div>
+        <canvas class="face" id="face" width="384" height="416"></canvas>
+      </div>
+    </main>
+
+    <div class="results" id="results" hidden></div>
+
+    <p class="hint" id="hint">tik op de microfoon en praat gewoon door</p>
+
+    <form class="search" id="search-form" action="#" method="get">
+      <label class="sr-only" for="q">Vraag iets aan Franka</label>
+      <input id="q" name="q" type="search" enterkeyhint="send" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Vraag iets aan Franka" maxlength="200">
+      <button type="button" class="mic-btn" id="mic-btn" aria-label="Praten" aria-pressed="false" title="Praat met Franka">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/>
+        </svg>
+      </button>
+      <button type="submit" class="go" aria-label="Versturen">Stuur</button>
+    </form>
+    <p class="listen-status" id="listen-status" hidden></p>
+    <p class="voice-hint" id="voice-hint" hidden></p>
+
+    <details class="settings" id="settings">
+      <summary>Instellingen</summary>
+      <label class="settings-label" for="shortcut-name">Opdracht-naam</label>
+      <input id="shortcut-name" type="text" maxlength="80" placeholder="Speel Spotify" autocomplete="off" spellcheck="false" enterkeyhint="done">
+      <p class="settings-help">Vul hier de exacte naam van je opdracht in Opdrachten in als je wilt dat Spotify muziek start.</p>
+      <label class="settings-check">
+        <input type="checkbox" id="voice-debug">
+        Toon spraakdetails
+      </label>
+      <pre class="voice-debug" id="voice-debug-log" hidden></pre>
+    </details>
+
+    <button type="button" class="tap-continue" id="tap-continue" hidden><span class="tap-continue-icon" aria-hidden="true">🎙️</span><span>Tik om verder te praten</span></button>
+  </div>
+
+  <script src="../assets/engine.js"></script>
+  <script src="assets/franka.js"></script>
+</body>
+</html>
