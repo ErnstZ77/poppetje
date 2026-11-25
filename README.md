@@ -81,4 +81,4 @@ Open daarna `http://127.0.0.1:8765/` op je computer, of op je iPhone in hetzelfd
 - Standen volgens Franka: rust = kalme, licht ondeugende glimlach, directe blik, af en toe knipperen; hand bij de kin alleen tijdens nadenken; opgetrokken wenkbrauw subtiel bij speelse reacties; geen nagemaakte praatmond; knikken bij klaar, nee-schudden bij een fout.
 - Op het beginscherm: Safari → https://ernstz77.github.io/poppetje/franka/ → Deel → **Zet op beginscherm** → naam **Franka**.
 
-Binaire bestanden gaan als `.b64` de repo in; de workflow `decode-icons.yml` zet ze om naar PNG/WebP.
+Geen GitHub Actions-workflows in deze repo (verwijderd op 25-11-2026). De echte PNG/WebP-bestanden staan er al; de `.b64`-bestanden zijn alleen nog een reservekopie.
