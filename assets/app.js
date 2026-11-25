@@ -15,6 +15,7 @@
   var micArm = document.getElementById("mic-arm");
   var shadow = document.getElementById("shadow");
   var bubbles = document.getElementById("bubbles");
+  var chatEl = document.getElementById("chat");
   var form = document.getElementById("search-form");
   var input = document.getElementById("q");
   var micBtn = document.getElementById("mic-btn");
@@ -226,6 +227,30 @@
 
   var AVATAR = '<svg class="bubble-avatar" viewBox="8 12 184 184" aria-hidden="true"><g transform="rotate(-8 100 108)"><circle cx="100" cy="108" r="62" fill="#000"/><path d="M 30.46 82.69 A 74 74 0 0 1 169.54 82.69" fill="none" stroke="#3F8C66" stroke-width="14" stroke-linecap="round"/><rect x="16" y="86" width="28" height="52" rx="14" fill="#3F8C66"/><rect x="156" y="86" width="28" height="52" rx="14" fill="#3F8C66"/><path d="M 36 128 Q 44 144 63 143" fill="none" stroke="#3F8C66" stroke-width="6" stroke-linecap="round"/><rect x="52" y="136" width="22" height="14" rx="7" fill="#3F8C66"/><g transform="rotate(8 103.5 105)"><rect x="96" y="90" width="15" height="30" rx="7.5" fill="#fff"/></g><g transform="rotate(8 131.5 105)"><rect x="124" y="90" width="15" height="30" rx="7.5" fill="#fff"/></g></g></svg>';
 
+  function updateChatting() {
+    var on = bubbles.querySelectorAll(".bubble-row.user").length > 0 || (resultsEl && !resultsEl.hidden);
+    document.body.classList.toggle("chatting", !!on);
+    requestAnimationFrame(function () { try { chatEl.scrollTop = chatEl.scrollHeight; } catch (err) {} });
+  }
+
+  /* Duidelijk ja-knikje na een antwoord. */
+  function nod() {
+    if (typeof anime === "undefined" || reduced) { blink(1); return Promise.resolve(); }
+    var obj = { y: 0 };
+    setLook(0, 0.35, 160);
+    return anime({
+      targets: obj,
+      y: [
+        { value: 12, duration: 170, easing: "easeOutQuad" },
+        { value: -2, duration: 170, easing: "easeInOutQuad" },
+        { value: 10, duration: 170, easing: "easeInOutQuad" },
+        { value: 0, duration: 260, easing: "easeOutBack(1.6)" }
+      ],
+      update: function () { state.bounceY = obj.y; applyMascotTransform(); },
+      complete: function () { setLook(0, 0, 240); }
+    }).finished;
+  }
+
   function bubble(text, who, opts) {
     if (!text) return null;
     who = who || "bot";
@@ -245,7 +270,7 @@
     }
     row.appendChild(el);
     bubbles.appendChild(row);
-    try { bubbles.scrollTop = bubbles.scrollHeight; } catch (err) {}
+
     if (typeof anime !== "undefined" && !reduced) {
       anime.remove(el);
       anime({
@@ -278,7 +303,8 @@
         setTimeout(function () { if (row.parentNode) row.remove(); }, life);
       }
     }
-    while (bubbles.children.length > 6) bubbles.removeChild(bubbles.firstChild);
+    while (bubbles.children.length > 12) bubbles.removeChild(bubbles.firstChild);
+    updateChatting();
     bobMic();
     return row;
   }
@@ -429,7 +455,7 @@
   }
 
 
-  var VERSION = "v9-live";
+  var VERSION = "v10";
 
   /* Gedeelde gespreks-engine (assets/engine.js): één langlevende herkenner. */
   var engine = window.PoppetjeEngine.create({
@@ -437,7 +463,7 @@
     storagePrefix: "poppetje",
     voice: "any",
     micLabel: "Praat met het poppetje",
-    persona: { whoami: "Ik ben je EJZ-poppetje, met koptelefoon.", hello: "Hoi! Waar kan ik je mee helpen?" },
+    persona: { name: "poppetje", whoami: "Ik ben je EJZ-poppetje, met koptelefoon.", hello: "Hoi Ernst! Wat kan ik voor je doen?" },
     els: {
       form: form,
       input: input,
@@ -448,7 +474,9 @@
       shortcutInput: shortcutInput,
       debugToggle: voiceDebugToggle,
       debugLog: voiceDebugLogEl,
-      tapContinue: tapContinue
+      tapContinue: tapContinue,
+      speakToggle: document.getElementById("speak-aloud"),
+      chat: chatEl
     },
     hooks: {
       bubble: function (t, who, o) { return bubble(t, who, o); },
@@ -465,7 +493,9 @@
           setLook(0, 0, 240);
         }
       },
-      onDone: function () { smileOn(true); setTimeout(function () { smileOn(false); }, 600); },
+      onDone: function () { smileOn(true); nod(); setTimeout(function () { smileOn(false); }, 900); },
+      onError: function () { turnHead(-1); },
+      onChatChange: updateChatting,
       onPlayful: function () { bounce(); },
       activity: activity
     }
@@ -674,6 +704,7 @@
     engine: engine,
     setHeadphones: setHeadphones,
     bounce: bounce,
+    nod: nod,
     blink: blink,
     bubble: bubble,
     turn: turnHead,

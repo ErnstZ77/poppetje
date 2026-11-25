@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  var ENGINE_VERSION = "v9-live";
+  var ENGINE_VERSION = "v10";
   var JOKES = [
     "Waarom hebben wastafels geen geheimen? Omdat ze alles laten weglopen.",
     "Wat zei de stoel tegen de tafel? Blijf zitten, ik sta er wel.",
@@ -178,6 +178,8 @@
   function extractSearchQuery(raw) {
     var q = String(raw || "").trim();
     q = q.replace(/^(ik ben (er )?op zoek naar|ik zoek naar|ik zoek|zoek eens naar|zoek naar|zoek maar|zoek|search for|search)\s+/i, "");
+    q = q.replace(/^(wie (is|was|zijn|waren)|wat (is|was|zijn|waren|betekent)( een| de| het)?|waar (is|ligt|lag|woont)|vertel (me |eens )?(iets )?over|informatie over|info over|leg uit( wat)?)\s+/i, "");
+    q = q.replace(/[?!.]+$/, "");
     return q.trim() || String(raw || "").trim();
   }
 
@@ -186,21 +188,35 @@
       t === "spotify" || t === "muziek";
   }
 
+  var GREET_RE = /^(he+y*|hé+|hee+|hey+|hoi+|hallo+|hai|hi|yo|joe|dag|daag|goedemorgen|goeiemorgen|goedemiddag|goeiemiddag|goedenavond|goeienavond|goeiedag|goedendag|morgen|middag|avond)(\s|$)/;
+  var LOOKUP_RE = /^(zoek|zoek op|google|wikipedia|wie (is|was|zijn|waren)|wat (is|was|zijn|waren|betekent|weet je over)|waar (is|ligt|lag|woont|komt)|wanneer|waarom|hoe (werkt|maak|kan|moet|heet|groot|oud|lang|ver|hoog|zwaar)|welke|hoeveel|vertel (me |eens )?(iets )?over|informatie over|info over|leg uit)\b/;
+
   function classifyQuery(raw, persona) {
     persona = persona || {};
-    var t = normalizeText(raw);
+    var t = normalizeText(raw).replace(/[éè]/g, "e");
     if (!t) return { type: "empty" };
-    if (/^(hoi|hallo|hey|hai|hi|goedemorgen|goedemiddag|goedenavond|goeiedag|goedendag)(\s|$)/.test(t) && t.split(" ").length <= 4) {
-      return { type: "chat", text: persona.hello || "Hoi! Waar kan ik je mee helpen?" };
-    }
+    var name = (persona.name || "").toLowerCase();
+    var words = t.split(" ");
+    var stripped = name ? t.replace(new RegExp("\\b" + name + "\\b", "g"), "").replace(/\s+/g, " ").trim() : t;
     if (/\b(hoe heet je|wie ben jij|wie ben je|wat is je naam)\b/.test(t)) {
       return { type: "chat", text: persona.whoami || "Ik ben je EJZ-poppetje.", playful: true };
     }
-    if (/\b(hoe gaat het( met je)?|alles goed)\b/.test(t)) {
+    if (/\b(hoe gaat het( met je| met jou)?|alles goed|hoe is het)\b/.test(t)) {
       return { type: "chat", text: persona.howAreYou || "Prima, dank je! En met jou?", playful: true };
     }
-    if (/^(dank je|dankjewel|dank je wel|bedankt|thanks|top|super|mooi zo)(\s|$)/.test(t)) {
+    if (/^(dank je|dankjewel|dank je wel|bedankt|thanks|top|super|mooi zo|lief|leuk)(\s|$)/.test(t)) {
       return { type: "chat", text: persona.thanks || "Graag gedaan!", playful: true };
+    }
+    if (/^(doei|dag dag|tot later|tot straks|welterusten|slaap lekker|fijne avond)(\s|$)/.test(t)) {
+      return { type: "chat", text: persona.bye || "Tot zo! Tik op de microfoon als je me weer nodig hebt.", playful: true };
+    }
+    /* Begroeting, met of zonder naam: nooit zoeken. */
+    if ((GREET_RE.test(t) && words.length <= 5 && !LOOKUP_RE.test(t.replace(GREET_RE, "").trim())) || (name && !stripped)) {
+      return { type: "chat", text: persona.hello || "Hoi Ernst! Wat kan ik voor je doen?", playful: true };
+    }
+    if (name && GREET_RE.test(t)) {
+      t = t.replace(GREET_RE, "").replace(new RegExp("^" + name + "\\b"), "").trim();
+      raw = t;
     }
     if (/\b(hoe laat is het|hoe laat is ie|hoe laat|wat is de tijd|hoe laat is het nu)\b/.test(t) || t === "tijd") {
       return { type: "chat", text: timeAnswer() };
@@ -214,7 +230,10 @@
     if (isSpotifyIntent(t)) return { type: "spotify" };
     var math = tryArithmetic(raw);
     if (math) return math;
-    return { type: "search", query: extractSearchQuery(raw) };
+    if (LOOKUP_RE.test(t) || /\?\s*$/.test(String(raw || "")) || t.split(" ").length >= 3) {
+      return { type: "search", query: extractSearchQuery(raw) };
+    }
+    return { type: "chat", text: persona.unknown || "Vertel, wat wil je weten? Vraag bijvoorbeeld: wie is, wat is, of zoek gevolgd door een onderwerp." };
   }
 
   function normalizeTurnText(s) {
@@ -290,6 +309,7 @@
     var form = els.form, input = els.input, micBtn = els.micBtn, resultsEl = els.results;
     var voiceHint = els.voiceHint, listenStatus = els.listenStatus, shortcutInput = els.shortcutInput;
     var debugToggle = els.debugToggle, debugLogEl = els.debugLog, tapContinue = els.tapContinue;
+    var speakToggle = els.speakToggle, chatEl = els.chat;
     var prefix = opts.storagePrefix || "poppetje";
     var SHORTCUT_KEY = prefix + "-shortcut-name";
     var DEBUG_KEY = prefix + "-voice-debug";
@@ -297,22 +317,21 @@
     var MUTE_AFTER_TTS_MS = 400;
     var START_WATCH_MS = 2500;
     var MAX_QUICK_RESTARTS = 4;
+    var LIVE_GRACE_MS = 2500;   /* na het praten: binnen 2,5 s echt luisteren, anders de tik-laag */
+    var DEAF_MS = 6000;         /* iOS kan na het praten doof worden zonder onend */
+    var MIN_THINK_MS = 700;
     var micLabel = opts.micLabel || "Praat met mij";
     var voicePref = opts.voice || "any";
 
-    var H = {
-      bubble: hooks.bubble || noop,
-      startThinking: hooks.startThinking || noop,
-      stopThinking: hooks.stopThinking || noop,
-      smile: hooks.smile || noop,
-      onSpeakStart: hooks.onSpeakStart || noop,
-      onSpeakEnd: hooks.onSpeakEnd || noop,
-      onListening: hooks.onListening || noop,
-      onDone: hooks.onDone || noop,
-      onError: hooks.onError || noop,
-      onPlayful: hooks.onPlayful || noop,
-      activity: hooks.activity || noop
-    };
+    function safe(fn, name) {
+      return function () {
+        try { return (fn || noop).apply(null, arguments); }
+        catch (err) { try { log("hook-fout", name + ": " + (err && err.message)); } catch (e2) {} return null; }
+      };
+    }
+    var H = {};
+    ["bubble", "startThinking", "stopThinking", "smile", "onSpeakStart", "onSpeakEnd", "onListening",
+     "onDone", "onError", "onPlayful", "activity", "onChatChange"].forEach(function (k) { H[k] = safe(hooks[k], k); });
 
     state.conversation = false;
     state.listening = false;
@@ -323,6 +342,8 @@
     state.pendingTranscript = "";
     state.muteUntil = 0;
     state.turns = 0;
+    state.lastSpeechEnd = 0;
+    state.liveSince = 0;
 
     var rec = null;           /* de ene langlevende herkenner */
     var recLive = false;      /* onstart/onaudiostart gezien */
@@ -405,34 +426,62 @@
       } catch (err) { log("unlockSpeech-error", err && err.message); }
     }
 
+    /* iOS: onend vuurt vaak niet, of de utterance wordt opgeruimd. Daarom: globale referentie,
+       polling van speechSynthesis.speaking en een waakhond op de geschatte duur. Altijd door. */
+    var SPEAK_KEY = prefix + "-hardop";
+    function speakAloud() {
+      if (speakToggle) return !!speakToggle.checked;
+      return true;
+    }
     function speak(text) {
       return new Promise(function (resolve) {
-        if (!text || !window.speechSynthesis || isShotMode()) { resolve(); return; }
-        try { speechSynthesis.cancel(); } catch (err) {}
-        var u = new SpeechSynthesisUtterance(text);
+        if (!text || !window.speechSynthesis || isShotMode() || !speakAloud()) { resolve(); return; }
+        var synth = window.speechSynthesis;
+        var u;
+        try { u = new SpeechSynthesisUtterance(text); } catch (err) { resolve(); return; }
         u.lang = "nl-NL";
         u.rate = 1;
         var v = pickVoice(voicePref);
         if (v) { u.voice = v; u.lang = v.lang || "nl-NL"; }
-        var done = false;
+        window.__ejzUtterance = u; /* niet laten opruimen */
+        var started = Date.now();
+        var estimate = 1500 + String(text).length * 70;
+        var done = false, poll = null, hard = null, quietPolls = 0;
         var finish = function (why) {
           if (done) return;
           done = true;
+          if (poll) clearInterval(poll);
+          if (hard) clearTimeout(hard);
+          if (why === "waakhond") { try { synth.cancel(); } catch (err) {} }
           state.speaking = false;
           state.muteUntil = Date.now() + MUTE_AFTER_TTS_MS;
-          log("tts-end", why || "");
+          state.lastSpeechEnd = Date.now();
+          log("tts-end", why + " na " + (Date.now() - started) + "ms");
           H.onSpeakEnd();
+          refreshStatus();
           resolve();
         };
         u.onend = function () { finish("onend"); };
-        u.onerror = function () { finish("onerror"); };
+        u.onerror = function (e) { finish("onerror " + ((e && e.error) || "")); };
         state.speaking = true;
         state.muteUntil = Date.now() + 60000;
         refreshStatus();
         H.onSpeakStart(text);
-        log("tts-start", (v && v.name) ? v.name : "standaard");
-        try { speechSynthesis.speak(u); } catch (err) { finish("throw"); return; }
-        setTimeout(function () { finish("timeout"); }, Math.min(15000, 1500 + String(text).length * 85));
+        log("tts-start", ((v && v.name) ? v.name : "standaard") + ", schatting " + estimate + "ms");
+        try {
+          if (synth.speaking || synth.pending) synth.cancel();
+          synth.speak(u);
+        } catch (err) { finish("throw"); return; }
+        poll = setInterval(function () {
+          var t = Date.now() - started;
+          var busyNow = false;
+          try { busyNow = !!(synth.speaking || synth.pending); } catch (err) {}
+          if (t > 700 && !busyNow) {
+            quietPolls += 1;
+            if (quietPolls >= 2) finish("poll");
+          } else quietPolls = 0;
+        }, 250);
+        hard = setTimeout(function () { finish("waakhond"); }, Math.min(20000, estimate + 2500));
       });
     }
 
@@ -484,6 +533,7 @@
       if (!resultsEl) return;
       resultsEl.innerHTML = "";
       resultsEl.hidden = true;
+      H.onChatChange();
     }
     function renderResults(items) {
       if (!resultsEl) return;
@@ -512,6 +562,8 @@
         resultsEl.appendChild(card);
       });
       resultsEl.hidden = false;
+      H.onChatChange();
+      try { if (chatEl) chatEl.scrollTop = chatEl.scrollHeight; } catch (err) {}
     }
     function fetchJson(url, ms) {
       var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -554,12 +606,14 @@
         return items;
       });
     }
-    function searchInApp(query) {
+    function searchInApp(query, thinkDone) {
       var q = String(query || "").trim();
       if (!q) return Promise.resolve([]);
+      thinkDone = thinkDone || function () { return Promise.resolve(); };
       H.bubble("Ik zoek het voor je.", "bot", { sticky: true });
-      return Promise.allSettled([searchWikipedia(q), searchDuckDuckGo(q)])
+      return Promise.allSettled([searchWikipedia(q), searchDuckDuckGo(q), thinkDone()])
         .then(function (parts) {
+          parts = parts.slice(0, 2);
           var items = [];
           var seen = {};
           parts.forEach(function (part) {
@@ -571,6 +625,7 @@
               items.push(item);
             });
           });
+          items = items.slice(0, 4);
           renderResults(items);
           var say = !items.length
             ? "Ik vond niks. Probeer andere woorden."
@@ -590,15 +645,21 @@
       if (!q) return Promise.resolve(null);
       H.activity();
       H.startThinking();
+      var t0 = Date.now();
+      var thinkDone = function () {
+        var left = MIN_THINK_MS - (Date.now() - t0);
+        return new Promise(function (r) { setTimeout(r, Math.max(0, left)); });
+      };
       var kind = classifyQuery(q, opts.persona);
-      if (kind.type === "spotify") return handleSpotify();
+      if (kind.type === "spotify") return thinkDone().then(handleSpotify);
       if (kind.type === "chat") {
-        clearResults();
-        if (kind.playful) H.onPlayful();
-        H.bubble(kind.text, "bot", { sticky: true });
-        return speak(kind.text).then(function () { return kind; });
+        return thinkDone().then(function () {
+          if (kind.playful) H.onPlayful();
+          H.bubble(kind.text, "bot", { sticky: true });
+          return speak(kind.text).then(function () { return kind; });
+        });
       }
-      return searchInApp(kind.query || q);
+      return searchInApp(kind.query || q, thinkDone);
     }
 
     /* ---------- beurten ---------- */
@@ -612,8 +673,12 @@
       clearSilence();
       clearDictate();
       state.busy = true;
+      state.turnStartedAt = Date.now();
+      restartTimes = []; /* er kwam iets door: de herkenner is gezond */
       state.pendingTranscript = "";
       state.turns += 1;
+      clearDeaf();
+      clearResults();
       /* Alles wat de herkenner tot nu toe hoorde is verwerkt. */
       consumedText = normalizeTurnText(lastParts.join(" "));
       consumedIndex = lastParts.length;
@@ -639,7 +704,7 @@
         consumedText = normalizeTurnText(lastParts.join(" "));
         consumedIndex = lastParts.length;
         refreshStatus();
-        if (state.conversation) ensureListening("after-turn");
+        if (state.conversation) listenAfterSpeech();
         return res;
       });
     }
@@ -690,8 +755,15 @@
     /* ---------- herkenner ---------- */
     function clearStartWatch() { if (startWatch) { clearTimeout(startWatch); startWatch = null; } }
 
+    var heardAt = 0;
+    var deafTimer = null;
+    function clearDeaf() { if (deafTimer) { clearTimeout(deafTimer); deafTimer = null; } }
+    function markHeard(source) {
+      heardAt = Date.now();
+      clearDeaf();
+    }
     function markLive(source) {
-      if (!recLive) log("live", source);
+      if (!recLive) { log("live", source); state.liveSince = Date.now(); everLive = true; }
       recLive = true;
       clearStartWatch();
       if (state.needsTap) hideTap();
@@ -730,9 +802,9 @@
       r.maxAlternatives = 1;
       r.onstart = function () { markLive("onstart"); };
       r.onaudiostart = function () { markLive("onaudiostart"); };
-      r.onsoundstart = function () { log("onsoundstart"); };
-      r.onspeechstart = function () { log("onspeechstart"); };
-      r.onresult = onResult;
+      r.onsoundstart = function () { log("onsoundstart"); markHeard("sound"); };
+      r.onspeechstart = function () { log("onspeechstart"); markHeard("speech"); };
+      r.onresult = function (ev) { markHeard("result"); onResult(ev); };
       r.onspeechend = function () { log("onspeechend"); };
       r.onaudioend = function () { log("onaudioend"); };
       r.onerror = function (ev) {
@@ -776,23 +848,60 @@
       }
       rec = r;
       recLive = false;
+      /* nieuwe sessie: transcript begint weer bij nul */
+      consumedText = "";
+      consumedIndex = 0;
+      lastParts = [];
       log("start()", source + (fromGesture ? " (tik)" : ""));
       clearStartWatch();
+      var watchMs = everLive ? START_WATCH_MS : 10000;
       startWatch = setTimeout(function () {
         startWatch = null;
         if (rec === r && !recLive) {
-          log("start-silent", START_WATCH_MS + "ms");
+          log("start-silent", watchMs + "ms");
           killRecognizer();
           if (state.conversation) showTap("stil");
         }
-      }, START_WATCH_MS);
+      }, watchMs);
       return true;
     }
 
+    /* Na het praten: iOS laat de oude herkenner vaak doof achter (geen onend, geen resultaten).
+       Daarom een verse herkenner, en als die niets hoort binnen DEAF_MS: de tik-laag. */
+    function listenAfterSpeech() {
+      if (!state.conversation || state.needsTap) return;
+      var spoke = state.lastSpeechEnd && Date.now() - state.lastSpeechEnd < 3000;
+      if (spoke && rec) {
+        log("verse-herkenner", "na praten");
+        killRecognizer();
+        setTimeout(function () {
+          if (!state.conversation || state.busy || state.needsTap) return;
+          ensureListening("na-praten", true);
+          armDeaf();
+        }, 300);
+        return;
+      }
+      ensureListening("after-turn");
+      if (spoke) armDeaf();
+    }
+    function armDeaf() {
+      clearDeaf();
+      var since = Date.now();
+      deafTimer = setTimeout(function () {
+        deafTimer = null;
+        if (!state.conversation || state.busy || state.needsTap) return;
+        if (heardAt > since) return;
+        if (state.pendingTranscript) return;
+        log("doof-na-praten", DEAF_MS + "ms zonder geluid");
+        showTap("doof");
+      }, DEAF_MS);
+    }
+
     /* Zorg dat er geluisterd wordt: direct herstarten, en na te veel snelle herstarts de tik-laag. */
-    function ensureListening(source) {
+    function ensureListening(source, planned) {
       if (!state.conversation || state.needsTap) return;
       if (rec) { refreshStatus(); return; }
+      if (planned) { log("auto-restart", source); startRecognizer(source, false); refreshStatus(); return; }
       var t = Date.now();
       restartTimes = restartTimes.filter(function (x) { return t - x < 10000; });
       if (restartTimes.length >= MAX_QUICK_RESTARTS) { showTap("te-vaak-gestopt"); return; }
@@ -802,6 +911,32 @@
       refreshStatus();
     }
 
+    var notLiveSince = 0;
+    var everLive = false;
+    setInterval(function () {
+      var now = Date.now();
+      if (state.busy && state.turnStartedAt && now - state.turnStartedAt > 30000) {
+        log("waakhond", "beurt hing >30s");
+        state.busy = false;
+        state.speaking = false;
+        try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (err) {}
+        H.stopThinking();
+        refreshStatus();
+      }
+      var live = !!(rec && recLive);
+      if (!state.conversation || state.needsTap || state.busy || state.speaking || live || now < state.muteUntil) {
+        notLiveSince = 0;
+        return;
+      }
+      if (!notLiveSince) notLiveSince = now;
+      if (now - notLiveSince > (everLive ? LIVE_GRACE_MS : 10000)) {
+        notLiveSince = 0;
+        log("waakhond", "luistert niet echt");
+        showTap("niet-live");
+      }
+      refreshStatus();
+    }, 500);
+
     function hideTap() {
       state.needsTap = false;
       if (tapContinue) tapContinue.hidden = true;
@@ -810,6 +945,7 @@
     }
     function showTap(reason) {
       killRecognizer();
+      clearDeaf();
       state.needsTap = true;
       setListening(false);
       showVoiceHint("");
@@ -824,6 +960,8 @@
       hideTap();
       unlockSpeech();
       if (!state.speaking && !state.busy) state.muteUntil = 0; /* bewuste tik: meteen luisteren */
+      try { if (window.speechSynthesis && !state.speaking) window.speechSynthesis.cancel(); } catch (err) {}
+      killRecognizer();
       restartTimes = [];
       H.activity();
       startRecognizer("tik-laag", true);
@@ -943,6 +1081,13 @@
       shortcutInput.addEventListener("change", save);
       shortcutInput.addEventListener("blur", save);
     }
+    if (speakToggle) {
+      try { var sv = window.localStorage.getItem(SPEAK_KEY); if (sv !== null) speakToggle.checked = sv === "1"; } catch (err) {}
+      speakToggle.addEventListener("change", function () {
+        try { window.localStorage.setItem(SPEAK_KEY, speakToggle.checked ? "1" : "0"); } catch (err) {}
+        log("hardop", speakToggle.checked ? "aan" : "uit");
+      });
+    }
     if (debugToggle) {
       try { debugToggle.checked = window.localStorage.getItem(DEBUG_KEY) === "1"; } catch (err) {}
       renderDebug();
@@ -978,5 +1123,5 @@
     };
   }
 
-  window.PoppetjeEngine = { create: create, version: ENGINE_VERSION, diffTranscript: diffTranscript, tryArithmetic: tryArithmetic };
+  window.PoppetjeEngine = { create: create, version: ENGINE_VERSION, diffTranscript: diffTranscript, tryArithmetic: tryArithmetic, classifyQuery: classifyQuery };
 })();
