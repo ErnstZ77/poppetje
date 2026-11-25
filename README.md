@@ -2,7 +2,7 @@
 
 Datum: 25-11-2026  
 Gemaakt door: Grok Bot  
-Status: live op GitHub Pages, 25-11-2026, na ja van Ernst. Versie v9-live (gespreks-engine) plus Franka.
+Status: live op GitHub Pages, 25-11-2026, na ja van Ernst. Versie v10 (gespreks-engine met waakhonden, vaste gezichtszone, nette resultaatkaarten) plus Franka.
 
 Live: https://ernstz77.github.io/poppetje/  
 Franka: https://ernstz77.github.io/poppetje/franka/

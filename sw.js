@@ -1,5 +1,5 @@
 /* EJZ Poppetje — network-first service worker for offline use. */
-var CACHE = "ejz-poppetje-v9-live";
+var CACHE = "ejz-poppetje-v10";
 var ASSETS = [
   "./",
   "./index.html",
