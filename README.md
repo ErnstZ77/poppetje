@@ -2,9 +2,10 @@
 
 Datum: 25-11-2026  
 Gemaakt door: Grok Bot  
-Status: live op GitHub Pages, 25-11-2026, na ja van Ernst.
+Status: live op GitHub Pages, 25-11-2026, na ja van Ernst. Versie v9-live (gespreks-engine) plus Franka.
 
-Live: https://ernstz77.github.io/poppetje/
+Live: https://ernstz77.github.io/poppetje/  
+Franka: https://ernstz77.github.io/poppetje/franka/
 
 Repo: https://github.com/ErnstZ77/poppetje
 
@@ -23,7 +24,7 @@ Interactief poppetje voor op het iPhone-beginscherm, getekend naar het Bitmap-vo
 - Kantelen (DeviceOrientation). Op iOS eerst op **Kantelen aanzetten** tikken (toestemming).
 - Lang indrukken: koptelefoon aan of uit (valt omlaag en klikt vast).
 - Zoeken blijft in de app: resultaatkaarten van Wikipedia en DuckDuckGo. Alleen een tik op een kaart gaat naar buiten.
-- Praten: tik op de microfoon. Na ongeveer een seconde stilte antwoordt hij vanzelf, wist het zoekveld en luistert hij opnieuw. Tik nog eens op de microfoon om te stoppen. Werkt de knop niet, dan kun je dicteren via het microfoontje op het toetsenbord; na een korte stilte stuurt hij het automatisch in.
+- Praten: tik één keer op de microfoon en praat gewoon door. Eén spraakherkenner blijft het hele gesprek aan; na ongeveer een seconde stilte antwoordt hij vanzelf. Terwijl hij zelf praat (plus 400 ms) luistert hij niet mee, zodat hij zichzelf niet hoort. Stopt iOS de microfoon toch, dan start hij direct opnieuw; lukt dat niet, dan verschijnt een groot scherm **Tik om verder te praten**. Tik op de microfoon om te stoppen. Enter in het tekstvak verstuurt ook. Werkt de knop niet, dan kun je dicteren via het microfoontje op het toetsenbord; na een korte stilte stuurt hij het automatisch in.
 - Hij beantwoordt hoi, hoe laat het is, welke dag het is, moppen en rekensommen (zoals 4×4 of twaalf gedeeld door drie) hardop.
 - “Zet Spotify aan” of “speel muziek”: hij probeert Spotify te openen. Lukt dat niet vanzelf, tik dan op **Open Spotify**. Met een opdracht in Opdrachten (zie hieronder) kan de muziek écht starten.
 - Na 5 seconden stilte een willekeurige idle-animatie.
@@ -71,3 +72,13 @@ Open daarna `http://127.0.0.1:8765/` op je computer, of op je iPhone in hetzelfd
 - anime.js v3.2.2, MIT, gekopieerd uit `team/ejz/b-versie/assets/anime.min.js`
 - Bewegingsidee: X-post van Bitmap Studio / @magdiel_rb, 25-11-2026
 - Headsetgroen naar het Bitmap-voorbeeld (`#3F8C66`)
+
+## Franka (v9-live)
+
+- Map `franka/`, live op https://ernstz77.github.io/poppetje/franka/ met een eigen manifest, icoon en naam **Franka**, dus een aparte app op het beginscherm.
+- Zelfde gespreks-engine (`assets/engine.js`), met een Nederlandse vrouwenstem als die er is (bijv. Claire).
+- Grafietgezicht uit de ejz-branch `franka/franka-grafiet-assets-2026-11-25` (alleen de gebruikte rijen, als WebP).
+- Standen volgens Franka: rust = kalme, licht ondeugende glimlach, directe blik, af en toe knipperen; hand bij de kin alleen tijdens nadenken; opgetrokken wenkbrauw subtiel bij speelse reacties; geen nagemaakte praatmond; knikken bij klaar, nee-schudden bij een fout.
+- Op het beginscherm: Safari → https://ernstz77.github.io/poppetje/franka/ → Deel → **Zet op beginscherm** → naam **Franka**.
+
+Binaire bestanden gaan als `.b64` de repo in; de workflow `decode-icons.yml` zet ze om naar PNG/WebP.
